@@ -18,27 +18,27 @@
   "training": {
     "epochs_requested": 1,
     "epochs_actual": 1,
-    "training_time_s": 48.4,
-    "final_train_loss": 1.1847,
-    "final_val_loss": 1.1007
+    "training_time_s": 61.9,
+    "final_train_loss": 1.2427,
+    "final_val_loss": 1.1268
   },
   "model_info": {
-    "total_params": 2090877,
-    "model_size_mb": 24.222,
+    "total_params": 1543117,
+    "model_size_mb": 18.026,
     "model_path": "C:\\Users\\hkphi\\OneDrive\\Desktop\\WORK\\retina_scan\\segmentation\\results\\pilot\\pilot_model.keras"
   },
   "evaluation": {
     "iou": {
-      "iou_class_0": 0.0,
-      "iou_class_1": 0.0004,
+      "iou_class_0": 0.0056,
+      "iou_class_1": 0.0,
       "iou_class_2": 0.0,
-      "mean_iou": 0.0001
+      "mean_iou": 0.0019
     },
     "dice": {
-      "dice_class_0": 0.0,
-      "dice_class_1": 0.0008,
+      "dice_class_0": 0.0112,
+      "dice_class_1": 0.0,
       "dice_class_2": 0.0,
-      "mean_dice": 0.0003
+      "mean_dice": 0.0037
     }
   }
 }

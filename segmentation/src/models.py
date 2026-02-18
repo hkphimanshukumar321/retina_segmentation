@@ -63,25 +63,30 @@ class GhostModule(layers.Layer):
         self.primary_conv = layers.Conv2D(
             self.primary_filters, kernel_size, padding='same', use_bias=False
         )
-        self.primary_bn = layers.BatchNormalization()
+        # GroupNorm: stable for small batches (Wu & He, ECCV 2018)
+        self.primary_gn = layers.GroupNormalization(
+            groups=min(8, self.primary_filters)
+        )
         self.primary_act = layers.Activation(activation)
 
         # Cheap operation: depthwise conv to generate ghosts
         self.ghost_dw = layers.DepthwiseConv2D(
             dw_kernel, padding='same', use_bias=False
         )
-        self.ghost_bn = layers.BatchNormalization()
+        self.ghost_gn = layers.GroupNormalization(
+            groups=min(8, self.primary_filters)
+        )
         self.ghost_act = layers.Activation(activation)
 
     def call(self, x, training=None):
         # Primary features
         primary = self.primary_conv(x)
-        primary = self.primary_bn(primary, training=training)
+        primary = self.primary_gn(primary, training=training)
         primary = self.primary_act(primary)
 
         # Ghost features (cheap linear transform of primary)
         ghost = self.ghost_dw(primary)
-        ghost = self.ghost_bn(ghost, training=training)
+        ghost = self.ghost_gn(ghost, training=training)
         ghost = self.ghost_act(ghost)
 
         # Concatenate and slice to exact filter count
@@ -117,7 +122,7 @@ class CoordinateAttention(layers.Layer):
         mid_channels = max(8, channels // self.reduction)
 
         self.shared_conv = layers.Conv2D(mid_channels, 1, use_bias=False)
-        self.shared_bn = layers.BatchNormalization()
+        self.shared_gn = layers.GroupNormalization(groups=min(8, mid_channels))
         self.shared_act = layers.Activation('relu')
 
         self.conv_h = layers.Conv2D(channels, 1, use_bias=False)
@@ -143,7 +148,7 @@ class CoordinateAttention(layers.Layer):
 
         # Shared transform
         combined = self.shared_conv(combined)
-        combined = self.shared_bn(combined, training=training)
+        combined = self.shared_gn(combined, training=training)
         combined = self.shared_act(combined)
 
         # Split back
@@ -496,8 +501,8 @@ def create_ghost_unet_v2(
             skip_connections.append(x)
             # No MaxPool here — preserves spatial resolution
 
-    # ---- BOTTLENECK (2× channels for richer representation) ----
-    bottleneck_filters = encoder_filters[-1] * 2
+    # ---- BOTTLENECK (ASPP expands via multi-scale, not channel doubling) ----
+    bottleneck_filters = encoder_filters[-1]
     if use_aspp:
         x = DW_ASPP(bottleneck_filters)(x)
     else:
@@ -512,11 +517,13 @@ def create_ghost_unet_v2(
         level_idx = n_levels - 1 - i  # which encoder level we're connecting to
 
         # Upsample (skip for the last encoder stage if no pooling was applied)
-        if i == 0 and True:  # first decoder level connects to dilated stage (same res)
+        if i == 0:  # first decoder level connects to dilated stage (same res)
             # No upsample needed — same spatial resolution
             pass
         else:
-            x = layers.Conv2DTranspose(filters, 2, strides=2, padding='same')(x)
+            # UpSampling2D + Ghost: lighter than Conv2DTranspose, no checkerboard
+            x = layers.UpSampling2D(2, interpolation='bilinear')(x)
+            x = GhostModule(filters, kernel_size=1, ratio=ghost_ratio)(x)
 
         # Skip connection with optional Attention Gate
         skip = skip_connections[-(i + 1)]
