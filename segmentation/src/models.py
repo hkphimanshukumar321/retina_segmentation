@@ -501,8 +501,10 @@ def create_ghost_unet_v2(
             skip_connections.append(x)
             # No MaxPool here — preserves spatial resolution
 
-    # ---- BOTTLENECK (ASPP expands via multi-scale, not channel doubling) ----
-    bottleneck_filters = encoder_filters[-1]
+    # ---- BOTTLENECK (2x channels + ASPP multi-scale) ----
+    # ASPP expands receptive field (spatial), *2 expands feature depth (channels)
+    # Both matter for IoU, especially for tiny objects like MA
+    bottleneck_filters = encoder_filters[-1] * 2
     if use_aspp:
         x = DW_ASPP(bottleneck_filters)(x)
     else:
