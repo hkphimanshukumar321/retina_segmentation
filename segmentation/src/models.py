@@ -496,8 +496,8 @@ def create_ghost_unet_v2(
             skip_connections.append(x)
             # No MaxPool here — preserves spatial resolution
 
-    # ---- BOTTLENECK ----
-    bottleneck_filters = encoder_filters[-1]
+    # ---- BOTTLENECK (2× channels for richer representation) ----
+    bottleneck_filters = encoder_filters[-1] * 2
     if use_aspp:
         x = DW_ASPP(bottleneck_filters)(x)
     else:
