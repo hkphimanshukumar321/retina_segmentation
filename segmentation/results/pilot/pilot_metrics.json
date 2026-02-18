@@ -1,16 +1,16 @@
 {
   "seed": 42,
   "config": {
-    "model": "Ghost_CAS_UNet",
+    "model": "Ghost_CAS_UNet_v2",
     "resolution": [
-      128,
-      128
+      256,
+      256
     ],
     "filters": [
-      16,
       32,
       64,
-      128
+      128,
+      256
     ],
     "ghost_ratio": 2,
     "skip_attention": true
@@ -18,27 +18,27 @@
   "training": {
     "epochs_requested": 1,
     "epochs_actual": 1,
-    "training_time_s": 22.0,
-    "final_train_loss": 1.4995,
-    "final_val_loss": 1.5771
+    "training_time_s": 49.6,
+    "final_train_loss": 1.18,
+    "final_val_loss": 1.1011
   },
   "model_info": {
-    "total_params": 703135,
-    "model_size_mb": 8.564,
+    "total_params": 1696381,
+    "model_size_mb": 19.712,
     "model_path": "C:\\Users\\hkphi\\OneDrive\\Desktop\\WORK\\retina_scan\\segmentation\\results\\pilot\\pilot_model.keras"
   },
   "evaluation": {
     "iou": {
-      "iou_class_0": 0.0705,
-      "iou_class_1": 0.0048,
+      "iou_class_0": 0.0,
+      "iou_class_1": 0.0008,
       "iou_class_2": 0.0,
-      "mean_iou": 0.0251
+      "mean_iou": 0.0003
     },
     "dice": {
-      "dice_class_0": 0.1317,
-      "dice_class_1": 0.0095,
+      "dice_class_0": 0.0,
+      "dice_class_1": 0.0017,
       "dice_class_2": 0.0,
-      "mean_dice": 0.047
+      "mean_dice": 0.0006
     }
   }
 }

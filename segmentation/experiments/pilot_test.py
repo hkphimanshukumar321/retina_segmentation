@@ -56,8 +56,10 @@ from common.data_loader import (
     decode_labelmap
 )
 from segmentation.src.models import SEGMENTATION_MODELS
-from segmentation.src.losses import combined_loss
-from segmentation.experiments.run_iou_analysis import compute_iou, compute_dice
+from segmentation.src.losses import combined_loss_v2
+from segmentation.experiments.run_iou_analysis import (
+    compute_iou, compute_dice, compute_clinical_metrics, compute_positive_only_iou
+)
 
 logger = logging.getLogger("pilot_test")
 
@@ -65,21 +67,23 @@ logger = logging.getLogger("pilot_test")
 # Configuration (hard‑coded sweet spot — independent of ablation)
 # ===========================================================================
 SEED          = 42
-IMG_SIZE      = (128, 128)
+IMG_SIZE      = (256, 256)      # v2: 256 for MA visibility
 NUM_CLASSES   = 3
 # Refined IDRiD label IDs (Table 2 from dataset paper):
 #   HE (Hemorrhage) = 127,  EX (Hard Exudate) = 63,  MA (Microaneurysm) = 255
 LABEL_IDS     = (127, 63, 255)
 CLASS_NAMES   = ("HE", "EX", "MA")
-ENCODER_FILTERS = [16, 32, 64, 128]
+ENCODER_FILTERS = [32, 64, 128, 256]   # v2: wider for capacity
 GHOST_RATIO   = 2
 USE_SKIP_ATTN = True          # Ghost‑CAS‑UNet
 DROPOUT       = 0.15
 LEARNING_RATE = 1e-3
 EPOCHS        = 50
 BATCH_SIZE    = 8
-PATCHES_TRAIN = 100           # increased from 50 for more lesion exposure
-PATCHES_VAL   = 20            # increased from 10
+PATCHES_TRAIN = 100           # increased for more lesion exposure
+PATCHES_VAL   = 20
+DEEP_SUPERVISION = True       # v2: auxiliary loss heads
+USE_ASPP      = True          # v2: multi-scale bottleneck
 
 
 # ===========================================================================
@@ -188,8 +192,8 @@ def main(quick_test: bool = False):
 
     print(f"[*] Train batches: {len(train_gen)},  Val batches: {len(val_gen)}")
 
-    # ---- Model ----
-    model_fn = SEGMENTATION_MODELS["ghost_ca_unet"]
+    # ---- Model (v2) ----
+    model_fn = SEGMENTATION_MODELS["ghost_cas_unet_v2"]
     model = model_fn(
         input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3),
         num_classes=NUM_CLASSES,
@@ -197,30 +201,43 @@ def main(quick_test: bool = False):
         dropout_rate=DROPOUT,
         ghost_ratio=GHOST_RATIO,
         use_skip_attention=USE_SKIP_ATTN,
+        use_aspp=USE_ASPP,
+        deep_supervision=DEEP_SUPERVISION,
     )
 
     optimizer = tf.keras.optimizers.Adam(
-        learning_rate=LEARNING_RATE, clipnorm=1.0    # gradient clipping for stability
+        learning_rate=LEARNING_RATE, clipnorm=1.0
     )
 
-    # OneHotIoU may not exist on older TF — fallback to MeanIoU
-    try:
-        iou_metric = tf.keras.metrics.OneHotIoU(
-            num_classes=NUM_CLASSES,
-            target_class_ids=[0, 1, 2],
-            name="iou",
-        )
-    except (AttributeError, TypeError):
-        iou_metric = tf.keras.metrics.MeanIoU(
-            num_classes=NUM_CLASSES, name="iou"
-        )
-        print("[WARN] OneHotIoU unavailable, using MeanIoU fallback")
-
-    model.compile(
-        optimizer=optimizer,
-        loss=combined_loss(alpha=0.3, beta=0.7, gamma=0.75),
-        metrics=["accuracy", iou_metric],
+    # v2 loss: Lovász-Softmax + Focal Tversky + BCE
+    loss_fn = combined_loss_v2(
+        w_lovasz=0.5, w_focal_tversky=0.3, w_bce=0.2,
+        ft_alpha=0.3, ft_beta=0.7, ft_gamma=0.75,
     )
+
+    # For deep supervision: apply same loss to main + aux outputs with weights
+    if DEEP_SUPERVISION:
+        loss_dict = {
+            'main_out': loss_fn,
+            'aux_up_1': loss_fn,
+            'aux_up_2': loss_fn,
+        }
+        loss_weights = {
+            'main_out': 1.0,
+            'aux_up_1': 0.4,
+            'aux_up_2': 0.2,
+        }
+        model.compile(
+            optimizer=optimizer,
+            loss=loss_dict,
+            loss_weights=loss_weights,
+            metrics={'main_out': ['accuracy']},
+        )
+    else:
+        model.compile(
+            optimizer=optimizer, loss=loss_fn,
+            metrics=['accuracy'],
+        )
 
     model.summary()
     total_params = model.count_params()
@@ -245,12 +262,52 @@ def main(quick_test: bool = False):
         tf.keras.callbacks.CSVLogger(str(results_dir / "pilot_training_log.csv")),
     ]
 
+    # ---- Deep supervision wrapper: generators must yield (X, [Y, Y, Y]) ----
+    if DEEP_SUPERVISION:
+        def _wrap_gen(gen):
+            for X, Y in gen:
+                yield X, {'main_out': Y, 'aux_up_1': Y, 'aux_up_2': Y}
+
+        ds_train = tf.data.Dataset.from_generator(
+            lambda: _wrap_gen(train_gen),
+            output_signature=(
+                tf.TensorSpec(shape=(None, IMG_SIZE[0], IMG_SIZE[1], 3), dtype=tf.float32),
+                {
+                    'main_out': tf.TensorSpec(shape=(None, IMG_SIZE[0], IMG_SIZE[1], NUM_CLASSES), dtype=tf.float32),
+                    'aux_up_1': tf.TensorSpec(shape=(None, IMG_SIZE[0], IMG_SIZE[1], NUM_CLASSES), dtype=tf.float32),
+                    'aux_up_2': tf.TensorSpec(shape=(None, IMG_SIZE[0], IMG_SIZE[1], NUM_CLASSES), dtype=tf.float32),
+                },
+            )
+        )
+        ds_val = tf.data.Dataset.from_generator(
+            lambda: _wrap_gen(val_gen),
+            output_signature=(
+                tf.TensorSpec(shape=(None, IMG_SIZE[0], IMG_SIZE[1], 3), dtype=tf.float32),
+                {
+                    'main_out': tf.TensorSpec(shape=(None, IMG_SIZE[0], IMG_SIZE[1], NUM_CLASSES), dtype=tf.float32),
+                    'aux_up_1': tf.TensorSpec(shape=(None, IMG_SIZE[0], IMG_SIZE[1], NUM_CLASSES), dtype=tf.float32),
+                    'aux_up_2': tf.TensorSpec(shape=(None, IMG_SIZE[0], IMG_SIZE[1], NUM_CLASSES), dtype=tf.float32),
+                },
+            )
+        )
+        train_data = ds_train
+        val_data = ds_val
+        steps_per_epoch = len(train_gen)
+        validation_steps = len(val_gen)
+    else:
+        train_data = train_gen
+        val_data = val_gen
+        steps_per_epoch = None
+        validation_steps = None
+
     # ---- Training ----
     t0 = time.time()
     history = model.fit(
-        train_gen,
-        validation_data=val_gen,
+        train_data,
+        validation_data=val_data,
         epochs=epochs,
+        steps_per_epoch=steps_per_epoch,
+        validation_steps=validation_steps,
         callbacks=callbacks,
         verbose=1,
     )
@@ -279,25 +336,31 @@ def main(quick_test: bool = False):
             print(f"[WARN] Full model save failed ({e2}). Weights saved successfully.")
             model_path = weights_path  # fallback for metrics reporting
 
-    # ---- Evaluate (IoU + Dice on val set) ----
-    print("\n[*] Evaluating on validation set …")
+    # ---- Evaluate (IoU + Dice on val set) using CORRECTED metrics ----
+    print("\n[*] Evaluating on validation set (threshold-based, no argmax) …")
     y_true_list, y_pred_list = [], []
     for batch_x, batch_y in val_gen:
         y_true_list.append(batch_y)
-        y_pred_list.append(model.predict(batch_x, verbose=0))
+        preds = model.predict(batch_x, verbose=0)
+        # Deep supervision: model returns [main_out, aux1, aux2] — use main_out only
+        if isinstance(preds, list):
+            preds = preds[0]
+        y_pred_list.append(preds)
 
     y_true = np.concatenate(y_true_list)
     y_pred = np.concatenate(y_pred_list)
 
     class_names = list(CLASS_NAMES)
-    iou_scores  = compute_iou(y_true, y_pred, NUM_CLASSES)
-    dice_scores = compute_dice(y_true, y_pred, NUM_CLASSES)
+    iou_scores   = compute_iou(y_true, y_pred, NUM_CLASSES)
+    dice_scores  = compute_dice(y_true, y_pred, NUM_CLASSES)
+    clinical     = compute_clinical_metrics(y_true, y_pred, NUM_CLASSES)
+    pos_iou      = compute_positive_only_iou(y_true, y_pred, NUM_CLASSES)
 
     # ---- Summary ----
     metrics = {
         "seed": SEED,
         "config": {
-            "model": "Ghost_CAS_UNet",
+            "model": "Ghost_CAS_UNet_v2",
             "resolution": list(IMG_SIZE),
             "filters": ENCODER_FILTERS,
             "ghost_ratio": GHOST_RATIO,
