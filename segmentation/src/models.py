@@ -109,7 +109,10 @@ class CoordinateAttention(layers.Layer):
         super().build(input_shape)
 
     def call(self, x, training=None):
-        _, h, w, c = tf.shape(x)[0], x.shape[1], x.shape[2], x.shape[3]
+        # Use tf.shape() for dynamic shapes (graph-mode compatible)
+        x_shape = tf.shape(x)
+        h = x_shape[1]
+        w = x_shape[2]
 
         # Pool along Width -> (B, H, 1, C)
         pool_h = tf.reduce_mean(x, axis=2, keepdims=True)
