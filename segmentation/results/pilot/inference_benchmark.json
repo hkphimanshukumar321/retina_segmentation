@@ -1,0 +1,18 @@
+{
+  "model_name": "Ghost_CAS_UNet",
+  "weights_file": "pilot_model.weights.h5",
+  "resolution": "128x128",
+  "total_params": 703135,
+  "model_size_mb": 8.564,
+  "num_runs": 5,
+  "inference_ms": {
+    "mean": 61.3,
+    "std": 2.33,
+    "min": 58.21,
+    "max": 63.96,
+    "p50": 62.49,
+    "p95": 63.77
+  },
+  "fps": 16.3,
+  "device": "CPU"
+}

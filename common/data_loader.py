@@ -397,10 +397,6 @@ def validate_images(
     return True
 
 
-    logger.info(f"Validated {len(sample)} images from {data_dir}")
-    return True
-
-
 import tensorflow as tf
 
 class PatchDataGenerator(tf.keras.utils.Sequence):
