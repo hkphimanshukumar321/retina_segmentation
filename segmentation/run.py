@@ -118,24 +118,30 @@ def run_all(quick_test: bool = False) -> bool:
     
     # 4. Training
     logger.info("Building model...")
-    from segmentation.src.models import create_unet_model
+    from segmentation.src.models import SEGMENTATION_MODELS
+    from segmentation.src.losses import combined_loss
     import tensorflow as tf
     
-    model = create_unet_model(
+    model_key = config.model.name.lower()
+    if model_key not in SEGMENTATION_MODELS:
+        logger.error(f"Unknown model: {config.model.name}. Available: {list(SEGMENTATION_MODELS.keys())}")
+        return False
+    
+    model_fn = SEGMENTATION_MODELS[model_key]
+    model = model_fn(
         input_shape=(config.data.img_size[0], config.data.img_size[1], 3),
         num_classes=config.model.num_classes
     )
     
     # Compile
     optimizer = tf.keras.optimizers.Adam(learning_rate=config.training.learning_rate)
-    loss = config.training.loss_function # "binary_crossentropy"
     
-    # Metrics
-    metrics = ["accuracy"]
-    if "binary_iou" in config.training.metrics:
-        metrics.append(tf.keras.metrics.BinaryIoU(target_class_ids=[0, 1], threshold=0.5, name="binary_iou"))
-    
-    model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+    model.compile(
+        optimizer=optimizer,
+        # AUDIT FIX: Use Focal Tversky Loss for better MA detection
+        loss=combined_loss(alpha=0.3, beta=0.7, gamma=0.75) if config.model.name.lower().startswith("ghost") else "binary_crossentropy",
+        metrics=['accuracy', tf.keras.metrics.OneHotIoU(num_classes=config.model.num_classes, target_class_ids=[0,1,2], name='iou')]
+    )
     model.summary(print_fn=logger.info)
     
     # Callbacks

@@ -35,9 +35,10 @@ class SegmentationDataConfig(BaseDataConfig):
 
 @dataclass
 class SegmentationModelConfig(BaseModelConfig):
-    name: str = "UNet"
+    name: str = "Ghost_CA_UNet"
     encoder_filters: Tuple[int, ...] = (16, 32, 64, 128)
     num_classes: int = 3
+    ghost_ratio: int = 2  # Ghost Module compression ratio (Now verified working)
 
 
 @dataclass

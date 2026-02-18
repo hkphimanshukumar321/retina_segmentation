@@ -492,10 +492,14 @@ class PatchDataGenerator(tf.keras.utils.Sequence):
                 self.config.data.bit_values
             )
             
-            # Augmentation
+            # Augmentation (apply SAME transform to image AND mask)
             if self.augmentations:
+                # Set shared random seed so both get identical transforms
+                seed = np.random.randint(0, 2**31)
+                np.random.seed(seed)
                 patch_img = self.augmentations(patch_img)
-                # Note: Mask aug still TODO as per previous logic
+                np.random.seed(seed)
+                patch_mask_decoded = self.augmentations(patch_mask_decoded)
                 
             batch_X.append(patch_img)
             batch_Y.append(patch_mask_decoded)
