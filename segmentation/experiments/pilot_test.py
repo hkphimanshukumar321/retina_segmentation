@@ -280,6 +280,8 @@ def main(quick_test: bool = False):
                 },
             )
         )
+        ds_train = ds_train.repeat()  # Fix: allow infinite epochs
+
         ds_val = tf.data.Dataset.from_generator(
             lambda: _wrap_gen(val_gen),
             output_signature=(
@@ -291,6 +293,7 @@ def main(quick_test: bool = False):
                 },
             )
         )
+        ds_val = ds_val.repeat()  # Fix: allow infinite epochs
         train_data = ds_train
         val_data = ds_val
         steps_per_epoch = len(train_gen)

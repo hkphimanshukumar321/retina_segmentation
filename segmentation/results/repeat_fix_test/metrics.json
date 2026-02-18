@@ -1,0 +1,41 @@
+{
+  "args": {
+    "model": "ghost_cas_unet_v2",
+    "name": "repeat_fix_test",
+    "seed": 42,
+    "gpu": -1,
+    "epochs": 2,
+    "batch_size": 8,
+    "lr": 0.001,
+    "patches_train": 2,
+    "patches_val": 2,
+    "resolution": [
+      256,
+      256
+    ],
+    "prob_lesion": 0.5,
+    "filters": [
+      32,
+      64,
+      128,
+      256
+    ],
+    "ghost_ratio": 2,
+    "dropout": 0.15,
+    "no_aspp": false,
+    "no_ds": false
+  },
+  "iou": {
+    "iou_class_0": 0.026030700914902578,
+    "iou_class_1": 0.00918224046667387,
+    "iou_class_2": 0.0004723665564478035,
+    "mean_iou": 0.011895102646008085
+  },
+  "dice": {
+    "dice_class_0": 0.05074058874006641,
+    "dice_class_1": 0.018197388139584672,
+    "dice_class_2": 0.0009442870632672333,
+    "mean_dice": 0.02329408798097277
+  },
+  "params": 1937485
+}

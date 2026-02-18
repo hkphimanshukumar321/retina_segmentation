@@ -256,8 +256,8 @@ def main():
             }
         )
         
-        train_data = tf.data.Dataset.from_generator(lambda: _wrap_gen(train_gen), output_signature=output_signature)
-        val_data = tf.data.Dataset.from_generator(lambda: _wrap_gen(val_gen), output_signature=output_signature)
+        train_data = tf.data.Dataset.from_generator(lambda: _wrap_gen(train_gen), output_signature=output_signature).repeat()
+        val_data = tf.data.Dataset.from_generator(lambda: _wrap_gen(val_gen), output_signature=output_signature).repeat()
     else:
         train_data = train_gen
         val_data = val_gen

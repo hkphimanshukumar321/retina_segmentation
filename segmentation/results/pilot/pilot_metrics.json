@@ -16,11 +16,11 @@
     "skip_attention": true
   },
   "training": {
-    "epochs_requested": 1,
-    "epochs_actual": 1,
-    "training_time_s": 60.3,
-    "final_train_loss": 1.2492,
-    "final_val_loss": 1.1287
+    "epochs_requested": 2,
+    "epochs_actual": 2,
+    "training_time_s": 98.5,
+    "final_train_loss": 1.0747,
+    "final_val_loss": 1.1037
   },
   "model_info": {
     "total_params": 1937485,
@@ -29,16 +29,16 @@
   },
   "evaluation": {
     "iou": {
-      "iou_class_0": 0.0062,
-      "iou_class_1": 0.0141,
-      "iou_class_2": 0.0004,
-      "mean_iou": 0.0069
+      "iou_class_0": 0.026,
+      "iou_class_1": 0.0092,
+      "iou_class_2": 0.0005,
+      "mean_iou": 0.0119
     },
     "dice": {
-      "dice_class_0": 0.0122,
-      "dice_class_1": 0.0278,
-      "dice_class_2": 0.0007,
-      "mean_dice": 0.0136
+      "dice_class_0": 0.0507,
+      "dice_class_1": 0.0182,
+      "dice_class_2": 0.0009,
+      "mean_dice": 0.0233
     }
   }
 }
