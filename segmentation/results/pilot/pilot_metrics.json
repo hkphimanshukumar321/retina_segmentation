@@ -18,9 +18,9 @@
   "training": {
     "epochs_requested": 1,
     "epochs_actual": 1,
-    "training_time_s": 87.2,
-    "final_train_loss": 1.2542,
-    "final_val_loss": 1.1559
+    "training_time_s": 60.3,
+    "final_train_loss": 1.2492,
+    "final_val_loss": 1.1287
   },
   "model_info": {
     "total_params": 1937485,
@@ -29,16 +29,16 @@
   },
   "evaluation": {
     "iou": {
-      "iou_class_0": 0.0024,
-      "iou_class_1": 0.0008,
-      "iou_class_2": 0.0,
-      "mean_iou": 0.0011
+      "iou_class_0": 0.0062,
+      "iou_class_1": 0.0141,
+      "iou_class_2": 0.0004,
+      "mean_iou": 0.0069
     },
     "dice": {
-      "dice_class_0": 0.0047,
-      "dice_class_1": 0.0016,
-      "dice_class_2": 0.0,
-      "mean_dice": 0.0021
+      "dice_class_0": 0.0122,
+      "dice_class_1": 0.0278,
+      "dice_class_2": 0.0007,
+      "mean_dice": 0.0136
     }
   }
 }

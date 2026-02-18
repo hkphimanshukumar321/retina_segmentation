@@ -36,6 +36,11 @@ class SegmentationDataConfig(BaseDataConfig):
     bit_values: Tuple[int, ...] = (8, 16, 32)
     
     img_size: Tuple[int, int] = (128, 128)
+    
+    # Lesion-aware sampling: probability of centering a patch on a lesion pixel
+    # 0.0 = purely random sampling (like v1)
+    # 0.5 = 50% patches centered on lesions, 50% random
+    prob_lesion: float = 0.5
 
 
 @dataclass

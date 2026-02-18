@@ -504,9 +504,43 @@ class PatchDataGenerator(tf.keras.utils.Sequence):
                                       interpolation=cv2.INTER_NEAREST)
                 h, w = img.shape[:2]
             
-            # Extract random patch (max(1, ...) prevents randint(0,0) crash)
-            y = np.random.randint(0, max(1, h - ph))
-            x = np.random.randint(0, max(1, w - pw))
+            # Lesion-aware sampling: center patch on a lesion with probability p
+            prob_lesion = getattr(self.config.data, 'prob_lesion', 0.5)
+            use_lesion_center = False
+            
+            if np.random.random() < prob_lesion:
+                # Find candidate lesion pixels
+                if hasattr(self.config.data, 'label_ids') and self.config.data.label_ids:
+                    # Refined IDRiD: check for exact labels
+                    lesion_mask = np.isin(raw_mask, self.config.data.label_ids)
+                    ys, xs = np.where(lesion_mask)
+                else:
+                    # Legacy: any non-zero pixel
+                    ys, xs = np.where(raw_mask > 0)
+                
+                if len(ys) > 0:
+                    use_lesion_center = True
+                    # Pick a random lesion pixel as anchor
+                    idx = np.random.randint(0, len(ys))
+                    cy, cx = ys[idx], xs[idx]
+                    
+                    # Determine valid top-left range so anchor is inside patch
+                    y_min = max(0, cy - ph + 1)
+                    y_max = min(h - ph, cy)
+                    # Ensure range is valid (y_max >= y_min)
+                    if y_max < y_min: y_max = y_min
+                    
+                    x_min = max(0, cx - pw + 1)
+                    x_max = min(w - pw, cx)
+                    if x_max < x_min: x_max = x_min
+                    
+                    y = np.random.randint(y_min, y_max + 1) if y_max >= y_min else 0
+                    x = np.random.randint(x_min, x_max + 1) if x_max >= x_min else 0
+
+            if not use_lesion_center:
+                # Standard random crop
+                y = np.random.randint(0, max(1, h - ph))
+                x = np.random.randint(0, max(1, w - pw))
             
             patch_img = img[y:y+ph, x:x+pw]
             patch_mask = raw_mask[y:y+ph, x:x+pw]

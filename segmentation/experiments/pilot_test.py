@@ -96,6 +96,7 @@ class _PilotConfig:
         img_size   = IMG_SIZE
         label_ids  = LABEL_IDS   # correct Refined IDRiD label IDs
         bit_values = None        # not used (triggers decode_labelmap path)
+        prob_lesion = 0.5        # 50% chance to center on lesion
     class model:
         num_classes = NUM_CLASSES
 
