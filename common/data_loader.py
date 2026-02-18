@@ -115,14 +115,8 @@ def decode_bitmask(mask: np.ndarray, num_classes: int, bit_values: List[int] = [
     """
     Convert bit-flag mask (H, W) to multi-channel binary mask (H, W, C).
     
-    Args:
-        mask: Input mask (H, W) or (H, W, 1) with integer values (0, 8, 16, 24...)
-        num_classes: Number of output channels
-        bit_values: List of integer values corresponding to each class bit
-                    e.g. [8, 16, 32] -> Channel 0 checks bit 8, Ch 1 checks 16...
-                    
-    Returns:
-        Multi-channel mask (H, W, num_classes) with 0.0 or 1.0 floats.
+    DEPRECATED for Refined IDRiD — use decode_labelmap() instead.
+    Retained for backward compatibility with original IDRiD format.
     """
     if len(mask.shape) == 3:
         mask = mask.squeeze(-1)
@@ -133,9 +127,41 @@ def decode_bitmask(mask: np.ndarray, num_classes: int, bit_values: List[int] = [
     for i in range(num_classes):
         if i < len(bit_values):
             bit_val = bit_values[i]
-            # Check if bit is set (using bitwise AND)
-            # Example: 24 & 8 = 8 (True), 24 & 16 = 16 (True)
             output[..., i] = ((mask.astype(np.uint8) & bit_val) == bit_val).astype(np.float32)
+            
+    return output
+
+
+def decode_labelmap(mask: np.ndarray, num_classes: int, label_ids: List[int]) -> np.ndarray:
+    """
+    Convert a label-ID mask (H, W) to a multi-channel binary mask (H, W, C).
+    
+    Unlike decode_bitmask (which uses bitwise AND for bit-flag masks),
+    this function uses direct equality matching for label-ID masks
+    like those in Refined IDRiD.
+    
+    Refined IDRiD label mapping (Table 2 from paper):
+        Background=0, Retina=8, Fovea=16, Vessel=24, OD=32,
+        VH=4, EX=63, IRMA=96, CWS=191, NV=166, HE=127, MA=255
+    
+    Args:
+        mask: Input grayscale mask (H, W) or (H, W, 1) with integer label IDs
+        num_classes: Number of output channels
+        label_ids: List of integer label IDs to extract, one per class.
+                   e.g. [127, 63, 255] for [HE, EX, MA]
+                   
+    Returns:
+        Multi-channel mask (H, W, num_classes) with 0.0 or 1.0 floats.
+    """
+    if len(mask.shape) == 3:
+        mask = mask.squeeze(-1)
+        
+    h, w = mask.shape
+    output = np.zeros((h, w, num_classes), dtype=np.float32)
+    
+    mask_uint8 = mask.astype(np.uint8)
+    for i in range(min(num_classes, len(label_ids))):
+        output[..., i] = (mask_uint8 == label_ids[i]).astype(np.float32)
             
     return output
 
@@ -486,11 +512,20 @@ class PatchDataGenerator(tf.keras.utils.Sequence):
             patch_mask = raw_mask[y:y+ph, x:x+pw]
             
             # Decoded multi-label mask
-            patch_mask_decoded = decode_bitmask(
-                patch_mask, 
-                self.config.model.num_classes, 
-                self.config.data.bit_values
-            )
+            # Use decode_labelmap for direct-ID labels (Refined IDRiD)
+            # Fall back to decode_bitmask for legacy bit-flag masks
+            if hasattr(self.config.data, 'label_ids') and self.config.data.label_ids:
+                patch_mask_decoded = decode_labelmap(
+                    patch_mask, 
+                    self.config.model.num_classes, 
+                    self.config.data.label_ids
+                )
+            else:
+                patch_mask_decoded = decode_bitmask(
+                    patch_mask, 
+                    self.config.model.num_classes, 
+                    self.config.data.bit_values
+                )
             
             # Augmentation (apply SAME transform to image AND mask)
             if self.augmentations:

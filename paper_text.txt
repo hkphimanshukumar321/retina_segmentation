@@ -1,0 +1,503 @@
+Received: 15 November 2025
+Revised: 23 December 2025
+Accepted: 21 January 2026
+Published: 1 February 2026
+Copyright: © 2026 by the authors.
+Licensee MDPI, Basel, Switzerland.
+This article is an open access article
+distributed under the terms and
+conditions of the Creative Commons
+Attribution (CC BY) license.
+Data Descriptor
+Refined IDRiD: An Enhanced Dataset for Diabetic Retinopathy
+Segmentation with Expert-Validated Annotations and
+Comprehensive Anatomical Context
+Sakon Chankhachon1
+, Supaporn Kansomkeat2, Patama Bhurayanontachai3
+and Sathit Intajag2,*
+1College of Digital Science, Prince of Songkla University, Songkhla 90110, Thailand
+2Division of Computational Science, Faculty of Science, Prince of Songkla University,
+Songkhla 90110, Thailand; supaporn.k@psu.ac.th
+3Department of Ophthalmology, Faculty of Medicine, Prince of Songkla University, Songkhla 90110, Thailand
+*Correspondence: sathit.i@psu.ac.th
+Abstract
+The Indian Diabetic Retinopathy Image Dataset (IDRiD) has been widely adopted for DR
+lesion segmentation research. However, it contains annotation gaps for proliferative DR
+lesions and labeling errors that limit its utility for comprehensive automated screening
+systems. We present Refined IDRiD, an enhanced version that addresses these limita-
+tions through (1) expert ophthalmologist validation and correction of labeling errors in
+original annotations for four non-proliferative lesions (microaneurysms, hemorrhages,
+hard exudates, cotton-wool spots), (2) the addition of three critical proliferative DR lesion
+annotations (neovascularization, vitreous hemorrhage, intraretinal microvascular abnor-
+malities), and (3) the integration of comprehensive anatomical context (optic disc, fovea,
+blood vessels, retinal region). A team of three ophthalmologists (one senior specialist
+with >10 years’ experience, two expert fundus image annotators) conducted systematic
+annotation refinement, achieving an inter-rater agreement F1-score of 0.9012. The enhanced
+dataset comprises 81 high-resolution fundus images with pixel-level annotations for seven
+DR lesion types and four anatomical structures. All images were cropped to the retinal
+region of interest and resized to 1024 ×1024 pixels, with annotations stored as unified
+grayscale masks containing 12 classes enabling efficient multi-task learning. Refined IDRiD
+enables training of comprehensive DR screening systems capable of detecting both non-
+proliferative and proliferative stages while reducing false positives through anatomical
+context awareness.
+Dataset: https://zenodo.org/records/17615903 (accessed on 20 January 2026).
+Dataset License: CC BY-4.0
+Keywords: diabetic retinopathy; dataset; image segmentation; deep learning; proliferative
+diabetic retinopathy; anatomical context; medical imaging
+1. Introduction
+Diabetic retinopathy (DR) represents the leading cause of preventable blindness among
+working-age populations worldwide [ 1]. Automated detection systems require high-
+quality annotated datasets for training robust deep learning models. The Indian Diabetic
+Retinopathy Image Dataset (IDRiD) [ 2] has emerged as a benchmark dataset, providing
+Data 2026 ,11, 30 https://doi.org/10.3390/data11020030
+Data 2026 ,11, 30 2 of 11
+pixel-level annotations for four non-proliferative DR lesions: microaneurysms (MAs),
+hemorrhages (HEs), hard exudates (EXs), and cotton-wool spots (CWSs).
+Several publicly available datasets have been developed for DR research, each with
+distinct characteristics and limitations. Table 1 presents a comprehensive comparison
+of these datasets. DDR [ 3] (Diabetic Retinopathy Detection) provides 757 images with
+pixel-level annotations for five lesion types but lacks anatomical structure annotations.
+E-ophtha [ 4] contains 463 images focusing specifically on microaneurysms and exu-
+dates. MESSIDOR [ 5] offers 1200 images but only provides image-level DR grading with-
+out pixel-level segmentation. DIARETDB1 [ 6] includes 89 images with annotations for
+four lesion types. FGADR [ 7] provides 2842 images with comprehensive annotations
+including both lesions and grading.
+Table 1. Comparison of publicly available DR segmentation datasets.
+Dataset Images Lesion Types Annotation Type PDR Lesions Anatomical Public
+IDRiD [2] 81 MA, HE, EX, CWS Pixel-level No OD only Yes
+DDR [3] 757 MA, HE, EX, CWS Pixel-level No No Yes
+E-ophtha [4] 463 MA, EX Pixel-level No No Yes
+FGADR [7] 1842 MA, HE, EX, CWS, NV , IRMA Pixel-level + Grade Yes No Yes
+Refined IDRiD (Ours) 81 MA, HE, EX, CWS, NV , VH, IRMA Pixel-level (unified) Yes Yes (5 types) Yes
+Despite its widespread adoption, the original IDRiD dataset has several critical limita-
+tions. First, it lacks annotations for proliferative DR lesions—neovascularization (NV), vitre-
+ous hemorrhage (VH), and intraretinal microvascular abnormalities (IRMAs)—preventing
+the development of comprehensive screening systems that address advanced disease stages
+requiring urgent intervention. Second, systematic review by expert ophthalmologists
+revealed annotation inconsistencies, including misclassification of image artifacts as patho-
+logical lesions, incomplete boundary delineation, and anatomical structures incorrectly
+labeled as lesions. Third, training datasets traditionally separate lesion annotations from
+anatomical structure information; recent research has demonstrated that explicit anatomical
+context integration significantly reduces false positives by enabling models to distinguish
+between normal structures and pathological features [8].
+This data descriptor presents Refined IDRiD, which addresses these limitations
+through (1) expert-validated error correction of all original annotations by experienced oph-
+thalmologists, achieving high inter-rater reliability (F1-score = 0.9012); (2) the addition of
+pixel-level annotations for three critical advanced-stage lesions (NV , VH, IRMA), enabling
+comprehensive DR screening across all severity levels; (3) systematic annotation of five
+classes (optic disc, fovea, blood vessels, retinal region, background) as explicit contextual
+classes; and (4) a unified 12-channel ground truth architecture providing integrated annota-
+tions for efficient multi-task learning. The enhanced dataset enables the development of
+clinically comprehensive automated screening systems while maintaining compatibility
+with existing IDRiD-based research.
+2. Data Description
+2.1. Dataset Overview
+Refined IDRiD comprises 81 high-resolution retinal fundus images originally captured
+using a Kowa VX-10 αdigital fundus camera at a 50◦field of view. The images represent
+various DR severity levels and contain pixel-level annotations for 7 lesion types and
+4 anatomical structures. The dataset maintains the original IDRiD train/test split (54 training,
+27 test images) to ensure compatibility with existing research.
+https://doi.org/10.3390/data11020030
+Data 2026 ,11, 30 3 of 11
+2.2. Image Preprocessing
+All images underwent standardized preprocessing to optimize them for deep learning
+applications. First, each fundus image was cropped to the retinal region of interest (ROI) to
+eliminate non-informative background areas. This cropping was applied identically to both
+the original images and all corresponding annotation masks to maintain precise spatial
+alignment. Since retinal regions vary in size and position across the images, the cropped
+dimensions differ per image, typically ranging from 2846 ×3408 to 2846 ×3801 pixels
+depending on the original retinal area.
+Following cropping, all images and masks were resized to a standardized 1024 ×1024 pixels
+using nearest-neighbor interpolation. This interpolation method was specifically chosen
+to preserve the discrete label values in annotation masks, preventing interpolation arti-
+facts that could create ambiguous intermediate class values. The resulting preprocessed
+images maintain high spatial resolution while enabling efficient batch processing in deep
+learning frameworks.
+2.3. Annotation Architecture
+The original IDRiD annotations stored each lesion class in separate binary mask files
+(e.g., IDRiD_01_MA.tif, IDRiD_01_HE.tif, IDRiD_01_EX.tif, IDRiD_03_SE.tif, IDRiD_01_OD.tif).
+For Refined IDRiD, we consolidated all annotations into unified multi-class masks to
+facilitate efficient data loading and multi-task learning. Each image has a corresponding
+single-channel grayscale PNG file (1024 ×1024, 8-bit) where pixel values encode class
+membership according to a predefined label mapping (Table 2).
+This unified annotation format offers several advantages: (1) simplified data loading
+requiring only a single file per image, (2) guaranteed spatial correspondence across all
+annotation classes, (3) memory-efficient storage using 8-bit grayscale rather than multiple
+binary files, and (4) direct compatibility with multi-class segmentation loss functions.
+Figure 1 illustrates an example annotation mask showing the distribution of different class
+labels across anatomical and pathological structures.
+ 
+(a) 
+ 
+(b) ( c) 
+ 
+ 
+ 
+ 
+ 
+Figure 1. An annotation mask example of image IDRiD_17 (Label_IDRiD_17.png) showing the unified
+12-class labeling scheme with distinct grayscale values for each anatomical structure and lesion type:
+https://doi.org/10.3390/data11020030
+Data 2026 ,11, 30 4 of 11
+(a) the multi-class mask presented in grayscale PNG format (1024 ×1024, 8-bit); ( b) cropped and
+resized from the original file: IDRiD_17.jpg; ( c) overlay of Label_IDRiD_17.png on the original image.
+Table 2. Class name and label identifier number.
+Class Name Label ID
+Background 0
+Retina 8
+Fovea (FV) 16
+Vessel 24
+Optic Disc (OD) 32
+Vitreous Hemorrhage (VH) 4
+Hard Exudate (EX) 63
+Intraretinal Microvascular Abnormality (IRMA) 96
+Cotton-Wool Spot (CWS) 191
+Neovascularization (NV) 166
+Hemorrhage (HE) 127
+Microaneurysm (MA) 255
+2.4. Dataset Statistics
+Table 3 presents comprehensive pixel-level statistics comparing the original IDRiD
+annotations with those for the enhanced Refined IDRiD dataset. The original dataset con-
+tained only four lesion classes with 98.10% of pixels classified as background, reflecting
+the severe class imbalance inherent in medical image segmentation. Refined IDRiD dra-
+matically improves annotation completeness by adding four anatomical structure classes
+(retina, vessel, optic disc, fovea) and three proliferative lesion classes (neovascularization,
+IRMA, vitreous hemorrhage).
+Table 3. Pixel count statistics for each class across all 81 images (after ROI cropping and 1024 ×1024 resizing).
+ClassOriginal IDRiD Enhanced IDRiD
+No. Pixels Class % No. Pixels Class %
+Background 82,151,578 98.10 23,634,564 27.83
+Retina 0 0.00 51,279,750 60.38
+Vessel 0 0.00 6,503,691 7.66
+Optic Disc 0 0.00 1,096,874 1.29
+Fovea 0 0.00 435,364 0.51
+Hard Exudates 529,486 0.63 800,220 0.94
+Hemorrhages 829,435 0.99 770,067 0.91
+Cotton-Wool Spots 164,869 0.20 153,786 0.18
+Microaneurysms 70,210 0.08 84,895 0.10
+Neovascularization 0 0.00 11,441 0.01
+IRMA 0 0.00 18,592 0.02
+Vitreous Hemorrhage 0 0.00 145,412 0.17
+The refined background now represents only 27.83% of total pixels, with the reti-
+nal region explicitly annotated (60.38%) and vascular structures detailed (7.66%). This
+comprehensive annotation enables models to learn explicit anatomical context, reducing
+false positives by providing clear differentiation between normal structures and pathol-
+https://doi.org/10.3390/data11020030
+Data 2026 ,11, 30 5 of 11
+ogy. The lesion annotations show refined boundaries and corrected errors: hard exudates
+increased from 529,486 to 800,220 pixels through the inclusion of previously missed le-
+sions, while hemorrhages decreased slightly (829,435 to 770,067) due to the removal of
+misclassified artifacts. The three newly annotated proliferative lesions (NV: 11,441 pixels;
+IRMA: 18,592 pixels; VH: 145,412 pixels) enable comprehensive DR screening across all
+severity levels.
+2.5. Lesion Prevalence
+An analysis of lesion distribution across the 81 images reveals clinically relevant
+patterns. Non-proliferative lesions show high prevalence: hemorrhages appear in 80 images
+(98.8%), hard exudates in 80 images (98.8%), microaneurysms in 81 images (100.0%), and
+cotton-wool spots in 39 images (48.2%). These prevalence rates reflect the dataset’s focus
+on DR-positive cases requiring clinical attention.
+Proliferative lesions show lower but clinically significant prevalence: Neovasculariza-
+tion appears in 2 images (2.5%), representing advanced proliferative DR cases requiring
+urgent intervention. Vitreous hemorrhage is present in 1 image (1.2%), indicating complica-
+tions from fragile new vessel bleeding. IRMA appears in 9 images (11.1%), representing
+severe non-proliferative DR and a critical predictor of progression to proliferative stages.
+This distribution enables the development of screening systems capable of identifying cases
+requiring immediate ophthalmological referral.
+3. Method
+3.1. Original Dataset
+The base dataset comprises 81 high-resolution retinal fundus images originally cap-
+tured using a Kowa VX-10 αdigital fundus camera at a 50◦field of view (original di-
+mensions: 4288 ×2848 pixels). Images were collected from the Eye Clinic in Nanded,
+Maharashtra, India, and originally annotated by trained graders under ophthalmologist su-
+pervision. The dataset represents various DR severity levels and is divided into 54 training
+and 27 test images.
+3.2. Expert Team and Annotation Workflow
+A three-member ophthalmology team conducted the comprehensive annotation re-
+finement. The team comprised (1) one senior board-certified ophthalmologist with more
+than 10 years of clinical experience in DR management and retinal imaging interpretation,
+serving as the authoritative validator for all consensus decisions; (2) two expert fundus
+image annotators, each with over 500 h of DR screening experience and thorough familiarity
+with Early Treatment Diabetic Retinopathy Study (ETDRS) diagnostic criteria.
+The annotation refinement followed a structured three-phase protocol as presented in
+Figure 2. In Phase 1 (Independent Review, 2 weeks), each ophthalmologist independently
+reviewed all 81 images and their corresponding original annotations using custom software
+built on MATLAB’s Image Labeler (R2023b) [ 9]. Reviewers flagged potential labeling
+errors in four categories: (1) artifact misclassification—image artifacts (lens dust, imag-
+ing irregularities) incorrectly annotated as MA or HE; (2) boundary errors—incomplete
+or excessive lesion boundary delineation; (3) anatomical confusion—normal structures
+incorrectly labeled as lesions; and (4) missing lesions—visible pathology not captured in
+original annotations.
+Phase 2 (Consensus Resolution, 1 week) involved structured meetings to resolve
+discrepancies. For each flagged annotation, majority agreement ( ≥2/3 reviewers) led to
+acceptance of the proposed correction; in cases lacking consensus, the senior specialist
+made the final determination based on clinical guidelines with documented rationale.
+https://doi.org/10.3390/data11020030
+Data 2026 ,11, 30 6 of 11
+Phase 3 (Quality Validation) calculated inter-rater agreement using the F1-score across all
+lesion pixels before and after consensus, achieving a final score of 0.9012, indicating high
+annotation quality.
+Figure 2. Phase 1 (Independent Review, 2 weeks): Three boxes for Reviewer 1 (Senior Ophthalmolo-
+gist), Reviewer 2 (Expert Annotator), Reviewer 3 (Expert Annotator) →Each reviews all 81 images
+independently →Arrows pointing to ‘Flag potential errors’. Phase 2 (Consensus Resolution, 1 week):
+Structured meeting box →Decision diamond: ‘ ≥2/3 agree?’ →Yes: Accept correction →No: Senior
+specialist final decision. Phase 3 (Quality Validation): Calculate inter-rater F1-score →Final output:
+‘Refined IDRiD (F1 = 0.9012)’.
+3.3. Proliferative Lesion Annotation
+Three proliferative lesion types were added based on clinical priority and prognostic
+significance. Neovascularization (NV) represents abnormal blood vessel growth on the
+retinal surface or optic disc, the hallmark of proliferative DR requiring immediate inter-
+vention. Vitreous hemorrhage (VH) indicates blood leakage into the vitreous cavity from
+fragile new vessels, causing sudden vision loss. Intraretinal microvascular abnormalities
+(IRMAs) are shunt vessels representing severe non-proliferative DR and strong predictors
+of progression to proliferative stages.
+Each ophthalmologist independently annotated NV , VH, and IRMA on all 81 images
+using standardized ETDRS criteria [ 10]. Annotations were performed using MATLAB
+Image Labeler (R2023b) with the following specifications: binary mask format (PNG,
+8-bit), minimum annotatable feature size of 5 pixels (approximately 50 µm at retinal scale),
+and boundary precision achieved through manual refinement at 400% zoom. Consensus
+resolution followed the same three-phase protocol used for error correction.
+3.4. Anatomical Context Integration
+Recent studies demonstrated that explicit anatomical structure modeling significantly
+reduces false positives in DR lesion segmentation [ 8]. Structures with similar appear-
+ance to pathology—particularly the optic disc (versus exudates) and blood vessels (ver-
+sus hemorrhages/microaneurysms)—benefit most from contextual differentiation. We
+systematically annotated five classes: optic disc, fovea, blood vessels, retinal region,
+and background.
+A pre-trained DeepLabV3+ model (described in [ 8]) generated initial automated masks
+for these structures. The ophthalmology team then manually refined all automated an-
+notations using the same validation protocol. Common corrections included optic disc
+https://doi.org/10.3390/data11020030
+Data 2026 ,11, 30 7 of 11
+boundary refinement (particularly nasal margin), foveal center localization adjustment, ves-
+sel continuity corrections in areas of pathology overlap, and retinal boundary adjustments
+for peripheral image regions.
+3.5. Data Preprocessing and Format Standardization
+Following annotation completion, all images underwent standardized preprocessing.
+Each fundus image and its corresponding multi-class annotation mask were cropped to the
+retinal region of interest, eliminating non-informative background areas while preserving
+spatial alignment. Since retinal regions vary in size, cropped dimensions differed per
+image. All cropped images and masks were then resized to 1024 ×1024 pixels using
+nearest-neighbor interpolation to preserve discrete label values.
+The original IDRiD annotations stored each lesion class in separate files. We con-
+solidated all seven lesion classes and four anatomical classes into unified single-channel
+grayscale masks where pixel values encode class membership (Table 2). This unified format
+enables (1) simplified data loading requiring only one file per image, (2) guaranteed spatial
+correspondence across classes, (3) memory-efficient 8-bit storage, and (4) direct compati-
+bility with multi-class segmentation frameworks. The final dataset file structure follows
+a standardized organization with separate directories for images, individual class masks,
+and unified masks.
+4. Technical Validation
+4.1. Inter-Rater Reliability
+Inter-rater agreement was calculated using the F1-score metric for each lesion class
+across all images. The F1-score provides interpretable per-class performance and is stan-
+dard in medical image segmentation validation [ 11]. For each lesion type and image,
+we computed the pixel-level precision, recall, and F1-score comparing annotations be-
+tween rater pairs, where TP , FP , and FN represent true positives, false positives, and false
+negatives, respectively.
+Inter-rater reliability was assessed using pairwise pixel-level comparisons among
+the three expert annotators. The individual pair F1-scores were R1 vs. R2 = 0.9338,
+R1 vs. R3 = 0.8577 , and R2 vs. R3 = 0.9121. The mean F1-score across all pairs was 0.9012
+(SD = 0.0438, 95% CI: [0.8587, 0.9579]), indicating excellent agreement as demonstrated in
+Table 4.
+Table 4. Inter-rater agreement metrics (mean across 3 annotator pairs).
+Lesion Type Precision Recall F1-Score
+Microaneurysm (MA) 0.8621 0.8849 0.8734
+Hemorrhage (HE) 0.9078 0.9236 0.9230
+Hard Exudate (EX) 0.9198 0.9378 0.9287
+Cotton-Wool Spot (CWS) 0.8867 0.9025 0.8945
+Neovascularization (NV) 0.8756 0.8891 0.8823
+Vitreous Hemorrhage (VH) 0.9045 0.9205 0.9420
+IRMA 0.8534 0.8752 0.8642
+Mean (Overall) 0.8871 0.9048 0.9012
+Overall agreement achieved a mean F1-score of 0.9012 across all lesion types. All lesion
+types exceeded the 0.85 threshold for excellent agreement in medical image annotation [ 12].
+The lower agreement for MA and IRMA reflects their subtle appearance and small size,
+consistent with known challenges in manual annotation.
+https://doi.org/10.3390/data11020030
+Data 2026 ,11, 30 8 of 11
+4.2. Reliability Comparison with Original Annotations
+To quantify the improvement from error correction, we trained identical DeepLabV3+
+models on (1) original IDRiD annotations and (2) Refined IDRiD annotations as presented
+in Table 5. Both models were tested on the standard IDRiD test set ( n= 27 images) following
+the original train/test split to ensure reproducibility and fair comparison. Segmentation
+performance using the Intersection over Union (IoU) metric showed consistent improve-
+ments across all lesion types (Table 5). The mean IoU improvement of 9.2% was statistically
+significant (paired t-test, p< 0.001), with effect size Cohen’s d = 0.82 indicating a large effect.
+The larger test set ( n= 27) provides more robust statistical power for these comparisons.
+Table 5. Model performance comparison: original vs. Refined IDRiD (DeepLabV3+, n= 27 test images).
+Lesion Type Original IoU Refined IoU Improvement p-Value
+Microaneurysm (MA) 0.5734 0.6389 +11.4% <0.001
+Hemorrhage (HE) 0.6156 0.6803 +10.5% <0.001
+Hard Exudate (EX) 0.6923 0.7359 +6.3% 0.002
+Cotton-Wool Spot (CWS) 0.6445 0.7025 +9.0% <0.001
+Mean (Overall) 0.6315 0.6894 +9.2% <0.001
+Refined annotations resulted in a 31.2% reduction in false-positive detections ( p< 0.001,
+n= 27), primarily through the removal of artifact annotations misclassified as lesions (64%
+of error corrections), better anatomical structure differentiation (24%), and improved lesion
+boundary precision (12%). Models trained with anatomical context showed substantial
+false-positive reductions: OD confused with EX decreased from 16.9% to 4.8% (71.6% reduc-
+tion), and vessels confused with HE/MA decreased from 21.4% to 8.3% (61.2% reduction),
+with the overall false-positive rate dropping from 19.2% to 6.5% (66.1% reduction). These
+results, evaluated on the complete test set, provide a more representative assessment of
+annotation quality improvement.
+4.3. Correlation Analysis: Original vs. Refined Annotations
+To quantify the relationship between the original and refined annotations, we con-
+ducted comprehensive correlation analysis. Pearson correlation coefficients for the pixel
+counts per image were obtained for MA (r = 0.9070, p< 0.001, n = 81), HE (r = 0.7459,
+p< 0.001, n= 80), EX (r = 0.9623, p< 0.001, n= 81), and CWS (r = 0.9639, p< 0.001,
+n= 50). These strong positive correlations indicate that the refinement process preserved
+the fundamental structure of original annotations while implementing targeted corrections.
+Spatial overlap agreement was measured using Dice coefficients. The overall Dice
+score was 0.8722 (95% CI: 0.8490–0.8954), with per-lesion metrics of precision = 0.8972,
+recall = 0.8486, and IoU = 0.7734. These results demonstrate substantial agreement while
+quantifying the specific refinements made—the moderate recall (0.8486) reflects the removal
+of incorrectly annotated artifacts from the original masks, while high precision (0.8972)
+confirms the retention of correctly identified lesions.
+4.4. Clinical Validation
+The senior ophthalmologist independently validated all proliferative lesion annota-
+tions against ETDRS diagnostic criteria [ 10]. Neovascularization annotations achieved
+100% compliance with the ETDRS definition (new vessels ≥1/4–1/3 disc area on optic disc,
+or≥1/2 disc area elsewhere). Vitreous hemorrhage annotations showed 100% agreement
+with clinical grading (varying degrees of vitreous opacity). IRMA annotations achieved
+https://doi.org/10.3390/data11020030
+Data 2026 ,11, 30 9 of 11
+97.3% agreement (4/149 annotations required boundary refinement to exclude adjacent
+normal vessels).
+5. Usage Notes
+5.1. Data Loading
+The unified annotation masks can be efficiently loaded in MATLAB using built-in
+functions such as readimage, imageDatastore, and pixelLabelDatastore. Each pixel value
+directly corresponds to the class label defined in Table 2. For multi-task learning applica-
+tions, researchers can separate the unified mask into lesion-specific and anatomy-specific
+channels by using conditional indexing based on the label IDs from Table 2.
+5.2. Class Imbalance Handling
+Despite anatomical context integration reducing the background class from 98.10%
+to 27.83%, lesion pixels still represent a small fraction of the total image area, creating
+class imbalance challenges. Recommended strategies include (1) using specialized loss
+functions such as Tversky loss [ 13] or Focal loss [ 14] rather than standard cross-entropy;
+(2) implementing patch-based training with balanced sampling from lesion and background
+regions; and (3) applying both geometric augmentations (rotation, flipping) and photomet-
+ric augmentations (illumination adjustment as described in [ 8]) to increase the effective
+training data diversity.
+5.3. Multi-Task Learning Architecture and Future Directions
+The comprehensive anatomical annotations enable effective multi-task learning ap-
+proaches. A recommended architecture employs a shared encoder (e.g., ResNet-50 or
+EfficientNet backbone) followed by task-specific decoders: Decoder 1 for seven-class lesion
+segmentation and Decoder 2 for five-class anatomical segmentation. The anatomical predic-
+tions can serve as auxiliary inputs to the lesion decoder through attention mechanisms or
+feature concatenation, explicitly providing context to reduce false positives. This approach
+has demonstrated a 68.2% false-positive reduction compared to lesion-only training [8].
+Recent advances in multi-task learning architectures have demonstrated promising
+results for DR segmentation. Fu et al. [ 15] proposed LFRC-Net, a lightweight frequency
+recalibration network for multi-lesion DR segmentation that achieves efficient performance
+on IDRiD. Their RMCA U-net [ 16] for hard exudate segmentation demonstrates the im-
+portance of multi-scale feature fusion, which our comprehensive annotations directly
+support. Additionally, their work on optic disc segmentation using probability bubbles [ 17]
+and fovea localization using blood vessel vectors [ 18] addresses anatomical structure
+detection—tasks that Refined IDRiD’s integrated anatomical annotations enable.
+Future work should evaluate these architectures on Refined IDRiD to establish baseline
+performance benchmarks. The dataset’s unified annotation format and comprehensive
+anatomical context may particularly benefit attention-based and transformer architectures
+that leverage spatial relationships between lesions and anatomical structures.
+5.4. Clinical Application Considerations
+Refined IDRiD enables the development of comprehensive DR screening systems cov-
+ering multiple severity stages. For early screening programs focusing on non-proliferative
+DR, models can be trained on MA, HE, EX, and CWS annotations with emphasis on high
+sensitivity to minimize false negatives. For proliferative DR detection requiring urgent
+referral decisions, models should incorporate NV , VH, and IRMA annotations with em-
+phasis on high specificity to minimize unnecessary urgent referrals. A recommended
+https://doi.org/10.3390/data11020030
+Data 2026 ,11, 30 10 of 11
+cascade architecture uses Stage 1 (non-proliferative) to filter inputs to Stage 2 (proliferative),
+optimizing computational efficiency while maintaining clinical sensitivity.
+5.5. Limitations
+Several limitations should be acknowledged. First, the dataset contains 81 images,
+which is insufficient for training production systems independently—researchers should
+consider combining it with other datasets or using it as a fine-tuning resource. The lim-
+ited dataset size (81 images) has important implications for our comparative analysis.
+DeepLabV3+ was selected as a validation model rather than a production system due to
+its established performance in medical image segmentation and reproducibility. When
+comparing models trained on small datasets, statistical power is reduced; we addressed this
+by using paired comparisons and reporting effect sizes alongside p-values. The 9.2% mean
+IoU improvement with consistent directionality across all lesion types provides evidence
+of a genuine annotation quality improvement rather than random variation. Researchers
+should use Refined IDRiD as a fine-tuning resource or in combination with larger datasets
+(e.g., DDR, FGADR) for training production systems. The trade-off between dataset size
+and annotation quality favors Refined IDRiD for validation and fine-tuning purposes
+where high-quality expert-validated annotations are critical. Second, all images originate
+from a single camera model (Kowa VX-10 α), limiting camera diversity and potentially
+impacting generalization. Third, the dataset represents an Indian patient population; model
+performance on other ethnicities requires validation. Fourth, only 12 proliferative DR cases
+(14.8%) are included; additional proliferative images would strengthen NV/VH detection
+capabilities. Fifth, the dataset lacks annotations for diabetic macular edema (DME), another
+critical DR complication requiring treatment.
+Author Contributions: Conceptualization: S.I.; Methodology: S.I. and P .B.; Annotation and val-
+idation: P .B. (lead ophthalmologist), with assistance from two expert fundus image annotators;
+Data curation and preprocessing: S.I.; Software development: S.C.; Statistical analysis: S.C. and S.I.;
+Writing—original draft: S.C.; Writing—review and editing: S.I., S.K. and P .B.; Supervision: S.I.; Fund-
+ing acquisition: S.I. All authors have read and agreed to the published version of the manuscript.
+Funding: This research received funding support from the NSRF via the Program Management
+Unit for Human Resources & Institutional Development, Research and Innovation (grant number
+B04G640070). The first author (S.C.) was supported by Thailand’s Education Hub for the Southern
+Region of ASEAN Countries for Ph.D. Students.
+Data Availability Statement: Refined IDRiD is publicly available at https://zenodo.org/records/
+17615903 (accessed on 20 January 2026) under a Creative Commons Attribution 4.0 International
+(CC BY 4.0) license, consistent with the original IDRiD license. The repository includes (1) all 81
+preprocessed fundus images (1024 ×1024 JPEG format); (2) individual class annotation masks
+for each lesion and anatomical structure; (3) unified 12-class annotation masks (grayscale PNG);
+(4) comprehensive metadata files documenting annotation changes, inter-rater agreement scores,
+and image characteristics; (5) MATLAB scripts for data loading, visualization, and evaluation; and
+(6) example MATLAB code for training a DeepLabV3+ (ResNet-50 backbone) multi-class segmentation
+model on the Refined IDRiD dataset.
+Acknowledgments: We thank the original IDRiD team (Porwal et al.) for creating the foundational
+dataset and making it publicly available under an open license. We acknowledge Prince of Songkla
+University for providing computational resources for validation experiments. We are grateful to the
+two expert fundus image annotators who contributed extensive time to annotation refinement.
+Conflicts of Interest: The authors declare no conflicts of interest.
+https://doi.org/10.3390/data11020030
+Data 2026 ,11, 30 11 of 11
+References
+1. Leley, S.P .; Ciulla, T.A.; Bhatwadekar, A.D. Diabetic Retinopathy in the Aging Population: A Perspective of Pathogenesis and
+Treatment. Clin. Interv. Aging 2021 ,16, 1367–1378. [CrossRef] [PubMed]
+2. Porwal, P .; Pachade, S.; Kamble, R.; Kokare, M.; Deshmukh, G.; Sahasrabuddhe, V .; Meriaudeau, F. Indian Diabetic Retinopathy
+Image Dataset (IDRiD): A Database for Diabetic Retinopathy Screening Research. Data 2018 ,3, 25. [CrossRef]
+3. Li, T.; Gao, Y.; Wang, K.; Guo, S.; Liu, H.; Kang, H. Diagnostic Assessment of Deep Learning Algorithms for Diabetic Retinopathy
+Screening. Inf. Sci. 2019 ,501, 511–522. [CrossRef]
+4. Decenci ère, E.; Zhang, X.; Cazuguel, G.; Lay, B.; Cochener, B.; Trone, C.; Gain, P .; Ordóñez, R.; Massin, P .; Erginay, A.; et al.
+TeleOphta: Machine Learning and Image Processing Methods for Teleophthalmology. IRBM 2013 ,34, 196–203. [CrossRef]
+5. Decenci ère, E.; Cazuguel, G.; Zhang, X.; Thibault, G.; Klein, J.C.; Meyer, F.; Marcotegui, B.; Quellec, G.; Lamard, M.; Danno, R.;
+et al. Feedback on a Publicly Distributed Database: The MESSIDOR Database. Image Anal. Stereol. 2014 ,33, 231–234. [CrossRef]
+6. Kauppi, T.; Kalesnykiene, V .; Kamarainen, J.K.; Lensu, L.; Sorri, I.; Raninen, A.; Voutilainen, R.; Uusitalo, H.; Kalviainen, H.;
+Pietilä, J. DIARETDB1 Diabetic Retinopathy Database and Evaluation Protocol ; Technical Report; Department of Ophthalmology,
+Faculty of Medicine, University of Kuopio: Kuopio, Finland, 2007.
+7. Zhou, Y.; Wang, B.; Huang, L.; Cui, S.; Shao, L. A Benchmark for Studying Diabetic Retinopathy: Segmentation, Grading, and
+Transferability. IEEE Trans. Med. Imaging 2021 ,40, 818–828. [CrossRef] [PubMed]
+8. Chankhachon, S.; Kansomkeat, S.; Bhurayanontachai, P .; Intajag, S. Deep Learning Network with Illuminant Augmentation for
+Diabetic Retinopathy Segmentation Using Comprehensive Anatomical Context Integration. Diagnostics 2025 ,15, 2762. [CrossRef]
+[PubMed]
+9. Ronneberger, O.; Fischer, P .; Brox, T. U-Net: Convolutional Networks for Biomedical Image Segmentation. In Medical Image
+Computing and Computer-Assisted Intervention–MICCAI 2015 ; Springer: Cham, Switzerland, 2015; pp. 234–241. [CrossRef]
+10. Early Treatment Diabetic Retinopathy Study Research Group. Grading Diabetic Retinopathy from Stereoscopic Color Fundus
+Photographs—An Extension of the Modified Airlie House Classification. ETDRS Report Number 10. Ophthalmology 1991 ,
+98, 786–806. [CrossRef]
+11. Müller, D.; Soto-Rey, I.; Kramer, F. Towards a Guideline for Evaluation Metrics in Medical Image Segmentation. BMC Res. Notes
+2022 ,15, 210. [CrossRef] [PubMed]
+12. Landis, J.R.; Koch, G.G. The Measurement of Observer Agreement for Categorical Data. Biometrics 1977 ,33, 159–174. [CrossRef]
+[PubMed]
+13. Salehi, S.S.M.; Erdogmus, D.; Gholipour, A. Tversky Loss Function for Image Segmentation Using 3D Fully Convolutional Deep
+Networks. In Machine Learning in Medical Imaging, MLMI 2017 ; Wang, Q., Shi, Y., Suk, H.I., Suzuki, K., Eds.; Lecture Notes in
+Computer Science; Springer: Cham, Switzerland, 2017; Volume 10541, pp. 379–387. [CrossRef]
+14. Lin, T.-Y.; Goyal, P .; Girshick, R.; He, K.; Dollár, P . Focal Loss for Dense Object Detection. In Proceedings of the 2017 IEEE
+International Conference on Computer Vision (ICCV), Venice, Italy, 22–29 October 2017; pp. 2999–3007. [CrossRef]
+15. Fu, Y.; Liu, M.; Zhang, G.; Peng, J. Lightweight Frequency Recalibration Network for Diabetic Retinopathy Multi-Lesion
+Segmentation. Appl. Sci. 2024 ,14, 6941. [CrossRef]
+16. Fu, Y.; Zhang, G.; Lu, X.; Wu, H.; Zhang, D. RMCA U-net: Hard Exudates Segmentation for Retinal Fundus Images. Expert Syst.
+Appl. 2023 ,234, 120987. [CrossRef]
+17. Fu, Y.; Chen, J.; Li, J.; Pan, D.; Yue, X.; Zhu, Y. Optic Disc Segmentation by U-net and Probability Bubble in Abnormal Fundus
+Images. Pattern Recognit. 2021 ,117, 107971. [CrossRef]
+18. Fu, Y.; Zhang, G.; Li, J.; Pan, D.; Wang, Y.; Zhang, D. Fovea Localization by Blood Vessel Vector in Abnormal Fundus Images.
+Pattern Recognit. 2022 ,129, 108711. [CrossRef]
+Disclaimer/Publisher’s Note: The statements, opinions and data contained in all publications are solely those of the individual
+author(s) and contributor(s) and not of MDPI and/or the editor(s). MDPI and/or the editor(s) disclaim responsibility for any injury to
+people or property resulting from any ideas, methods, instructions or products referred to in the content.
+https://doi.org/10.3390/data11020030

@@ -52,7 +52,8 @@ from common.logger import setup_logging
 from common.data_loader import (
     PatchDataGenerator, AugmentationPipeline,
     RandomFlip, RandomRotation, RandomBrightness,
-    RandomContrast, RandomElasticDeform
+    RandomContrast, RandomElasticDeform,
+    decode_labelmap
 )
 from segmentation.src.models import SEGMENTATION_MODELS
 from segmentation.src.losses import combined_loss
@@ -66,7 +67,10 @@ logger = logging.getLogger("pilot_test")
 SEED          = 42
 IMG_SIZE      = (128, 128)
 NUM_CLASSES   = 3
-BIT_VALUES    = (8, 16, 32)
+# Refined IDRiD label IDs (Table 2 from dataset paper):
+#   HE (Hemorrhage) = 127,  EX (Hard Exudate) = 63,  MA (Microaneurysm) = 255
+LABEL_IDS     = (127, 63, 255)
+CLASS_NAMES   = ("HE", "EX", "MA")
 ENCODER_FILTERS = [16, 32, 64, 128]
 GHOST_RATIO   = 2
 USE_SKIP_ATTN = True          # Ghost‑CAS‑UNet
@@ -74,8 +78,8 @@ DROPOUT       = 0.15
 LEARNING_RATE = 1e-3
 EPOCHS        = 50
 BATCH_SIZE    = 8
-PATCHES_TRAIN = 50            # patches per image (training)
-PATCHES_VAL   = 10            # patches per image (validation)
+PATCHES_TRAIN = 100           # increased from 50 for more lesion exposure
+PATCHES_VAL   = 20            # increased from 10
 
 
 # ===========================================================================
@@ -86,7 +90,8 @@ class _PilotConfig:
     """Minimal config duck‑type expected by PatchDataGenerator."""
     class data:
         img_size   = IMG_SIZE
-        bit_values = BIT_VALUES
+        label_ids  = LABEL_IDS   # correct Refined IDRiD label IDs
+        bit_values = None        # not used (triggers decode_labelmap path)
     class model:
         num_classes = NUM_CLASSES
 
@@ -133,7 +138,9 @@ def main(quick_test: bool = False):
     print(f"  Filters      : {ENCODER_FILTERS}")
     print(f"  Ghost ratio  : {GHOST_RATIO}")
     print(f"  Skip Attention: {USE_SKIP_ATTN}")
+    print(f"  Label IDs    : {LABEL_IDS}  ({', '.join(CLASS_NAMES)})")
     print(f"  Epochs       : {epochs}")
+    print(f"  Patches/img  : {patches_tr} (train), {patches_val} (val)")
     print(f"  Quick test   : {quick_test}")
     print("=" * 60 + "\n")
 
@@ -282,7 +289,7 @@ def main(quick_test: bool = False):
     y_true = np.concatenate(y_true_list)
     y_pred = np.concatenate(y_pred_list)
 
-    class_names = ["Background/OD", "HE/EX", "MA"]
+    class_names = list(CLASS_NAMES)
     iou_scores  = compute_iou(y_true, y_pred, NUM_CLASSES)
     dice_scores = compute_dice(y_true, y_pred, NUM_CLASSES)
 

@@ -27,7 +27,12 @@ class SegmentationDataConfig(BaseDataConfig):
     mask_dir: str = "Labels" if (Path(__file__).parent.parent / "data" / "segmentation" / "Labels").exists() else "masks"
     
     num_classes: int = 3
-    # Bit-flags for each class: 8 (Class 0), 16 (Class 1), 32 (Class 2)
+    # Refined IDRiD label IDs (from Table 2 of the dataset paper):
+    #   HE (Hemorrhage) = 127,  EX (Hard Exudate) = 63,  MA (Microaneurysm) = 255
+    # These are direct integer label IDs, NOT bit flags.
+    label_ids: Tuple[int, ...] = (127, 63, 255)
+    class_names: Tuple[str, ...] = ("HE", "EX", "MA")
+    # Legacy bit_values kept for backward compatibility (DO NOT USE for Refined IDRiD)
     bit_values: Tuple[int, ...] = (8, 16, 32)
     
     img_size: Tuple[int, int] = (128, 128)
