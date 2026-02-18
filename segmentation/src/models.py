@@ -70,7 +70,8 @@ class GhostModule(layers.Layer):
 
         # Concatenate and slice to exact filter count
         out = tf.concat([primary, ghost], axis=-1)
-        return out[..., :self.filters]
+        # Use explicit 4D indexing for graph-mode compatibility
+        return out[:, :, :, :self.filters]
 
     def get_config(self):
         config = super().get_config()
@@ -174,21 +175,10 @@ class AttentionGate(layers.Layer):
         xl = self.wl(x)
         gg = self.wg(g)
 
-        # Add (broadcast) -> ReLU -> 1x1 Conv -> Sigmoid
-        # Note: If spatial dims differ, we might need resizing, but in U-Net 
-        # concatenation steps, they usually match or are handled before.
-        # Standard AG assumes dimensions match or are upsampled.
-        # For simplicity in this custom layer, we assume 'g' is upsampled to match 'x' 
-        # OR we rely on broadcasting if 'g' is 1x1 (which it isn't).
-        
-        # In standard U-Net, g is the decoder feature (coarse). x is encoder (fine).
-        # We need to upsample g to match x for pixel-wise addition? 
-        # Actually, in standard AG block, they perform 1x1 on both, then add.
-        # If sizes mismatch, tf.add will fail.
-        # SAFEGUARD: Resize g to match x
-        if x.shape[1] is not None and g.shape[1] is not None:
-             if x.shape[1] != g.shape[1]:
-                 gg = tf.image.resize(gg, (tf.shape(x)[1], tf.shape(x)[2]))
+        # SAFEGUARD: Always resize g to match x using dynamic shapes.
+        # Static shapes are None in graph mode, so we always resize.
+        # tf.image.resize is a no-op if shapes already match at runtime.
+        gg = tf.image.resize(gg, (tf.shape(x)[1], tf.shape(x)[2]))
 
         joined = tf.add(xl, gg)
         act = tf.nn.relu(joined)

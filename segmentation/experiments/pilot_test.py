@@ -192,29 +192,41 @@ def main(quick_test: bool = False):
         use_skip_attention=USE_SKIP_ATTN,
     )
 
-    optimizer = tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE)
+    optimizer = tf.keras.optimizers.Adam(
+        learning_rate=LEARNING_RATE, clipnorm=1.0    # gradient clipping for stability
+    )
+
+    # OneHotIoU may not exist on older TF — fallback to MeanIoU
+    try:
+        iou_metric = tf.keras.metrics.OneHotIoU(
+            num_classes=NUM_CLASSES,
+            target_class_ids=[0, 1, 2],
+            name="iou",
+        )
+    except (AttributeError, TypeError):
+        iou_metric = tf.keras.metrics.MeanIoU(
+            num_classes=NUM_CLASSES, name="iou"
+        )
+        print("[WARN] OneHotIoU unavailable, using MeanIoU fallback")
+
     model.compile(
         optimizer=optimizer,
         loss=combined_loss(alpha=0.3, beta=0.7, gamma=0.75),
-        metrics=[
-            "accuracy",
-            tf.keras.metrics.OneHotIoU(
-                num_classes=NUM_CLASSES,
-                target_class_ids=[0, 1, 2],
-                name="iou",
-            ),
-        ],
+        metrics=["accuracy", iou_metric],
     )
 
     model.summary()
     total_params = model.count_params()
 
     # ---- Callbacks ----
+    # NOTE: save_weights_only=True avoids Keras-format 'options' arg error
+    #       on older TF versions. We save the full model manually after training.
     callbacks = [
         tf.keras.callbacks.ModelCheckpoint(
-            filepath=str(results_dir / "pilot_best.keras"),
+            filepath=str(results_dir / "pilot_best.weights.h5"),
             monitor="val_loss",
             save_best_only=True,
+            save_weights_only=True,
             verbose=1,
         ),
         tf.keras.callbacks.ReduceLROnPlateau(
@@ -237,16 +249,28 @@ def main(quick_test: bool = False):
     )
     train_time = time.time() - t0
 
-    # ---- Save model (.keras) for RPi ----
-    model_path = results_dir / "pilot_model.keras"
-    model.save(str(model_path))
-    model_size_mb = model_path.stat().st_size / (1024 * 1024)
-    print(f"\n[*] Model saved → {model_path}  ({model_size_mb:.2f} MB)")
-
-    # ---- Also save weights separately (more reliable for custom layers) ----
+    # ---- Save weights (reliable across all TF versions) ----
     weights_path = results_dir / "pilot_model.weights.h5"
     model.save_weights(str(weights_path))
-    print(f"[*] Weights saved → {weights_path}")
+    model_size_mb = weights_path.stat().st_size / (1024 * 1024)
+    print(f"\n[*] Weights saved → {weights_path}  ({model_size_mb:.2f} MB)")
+
+    # ---- Try saving full model (may fail on older TF, non-critical) ----
+    model_path = results_dir / "pilot_model.keras"
+    try:
+        model.save(str(model_path))
+        model_size_mb = model_path.stat().st_size / (1024 * 1024)
+        print(f"[*] Full model saved → {model_path}  ({model_size_mb:.2f} MB)")
+    except (ValueError, TypeError) as e:
+        # Fallback to legacy HDF5 format
+        model_path = results_dir / "pilot_model.h5"
+        try:
+            model.save(str(model_path), save_format='h5')
+            model_size_mb = model_path.stat().st_size / (1024 * 1024)
+            print(f"[*] Full model saved (HDF5) → {model_path}  ({model_size_mb:.2f} MB)")
+        except Exception as e2:
+            print(f"[WARN] Full model save failed ({e2}). Weights saved successfully.")
+            model_path = weights_path  # fallback for metrics reporting
 
     # ---- Evaluate (IoU + Dice on val set) ----
     print("\n[*] Evaluating on validation set …")

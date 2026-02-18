@@ -147,9 +147,10 @@ def run_all(quick_test: bool = False) -> bool:
     # Callbacks
     callbacks = [
         tf.keras.callbacks.ModelCheckpoint(
-            filepath=str(current_dir / "results" / "best_model.keras"),
+            filepath=str(current_dir / "results" / "best_model.weights.h5"),
             monitor="val_loss",
             save_best_only=True,
+            save_weights_only=True,
             verbose=1
         ),
         tf.keras.callbacks.ReduceLROnPlateau(
@@ -180,8 +181,15 @@ def run_all(quick_test: bool = False) -> bool:
             verbose=1
         )
         
-        # Save final model
-        model.save(str(current_dir / "results" / "final_model.keras"))
+        # Save final model (weights first, then try full model)
+        model.save_weights(str(current_dir / "results" / "final_model.weights.h5"))
+        try:
+            model.save(str(current_dir / "results" / "final_model.keras"))
+        except (ValueError, TypeError):
+            try:
+                model.save(str(current_dir / "results" / "final_model.h5"), save_format='h5')
+            except Exception:
+                pass  # Weights already saved
         logger.info("Training complete.")
         return True
         

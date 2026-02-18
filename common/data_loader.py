@@ -450,12 +450,10 @@ class PatchDataGenerator(tf.keras.utils.Sequence):
             img_idx = i // self.patches_per_image
             
             # Load full resolution image/mask
-            # Optimization: Cache logic or keep file handles if slow, 
-            # but for 54 images, OS caching might handle repeats well.
             img_path = self.image_paths[img_idx]
             mask_path = self.mask_paths[img_idx]
             
-            # Load without resizing (keep 1024x1024)
+            # Load without resizing (keep original resolution)
             img = cv2.imread(str(img_path))
             if img is not None:
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
@@ -464,19 +462,25 @@ class PatchDataGenerator(tf.keras.utils.Sequence):
             raw_mask = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
             
             if img is None or raw_mask is None:
-                # Should not happen if confirmed valid, but return zeros to avoid crash
-                batch_X.append(np.zeros((*self.patch_size, 3)))
-                batch_Y.append(np.zeros((*self.patch_size, self.config.model.num_classes)))
+                # Return zeros to avoid crash
+                batch_X.append(np.zeros((*self.patch_size, 3), dtype=np.float32))
+                batch_Y.append(np.zeros((*self.patch_size, self.config.model.num_classes), dtype=np.float32))
                 continue
                 
             h, w = img.shape[:2]
             ph, pw = self.patch_size
             
-            # Extract random patch
-            # Optimization: Could pass pre-loaded images if memory allows (54 images fits in RAM)
-            # For now, load from disk each time (slow but safe)
-            y = np.random.randint(0, h - ph)
-            x = np.random.randint(0, w - pw)
+            # SAFEGUARD: If image is smaller than patch, resize up
+            if h < ph or w < pw:
+                scale = max(ph / h, pw / w) + 0.01
+                img = cv2.resize(img, (int(w * scale), int(h * scale)))
+                raw_mask = cv2.resize(raw_mask, (int(w * scale), int(h * scale)), 
+                                      interpolation=cv2.INTER_NEAREST)
+                h, w = img.shape[:2]
+            
+            # Extract random patch (max(1, ...) prevents randint(0,0) crash)
+            y = np.random.randint(0, max(1, h - ph))
+            x = np.random.randint(0, max(1, w - pw))
             
             patch_img = img[y:y+ph, x:x+pw]
             patch_mask = raw_mask[y:y+ph, x:x+pw]
@@ -497,8 +501,8 @@ class PatchDataGenerator(tf.keras.utils.Sequence):
                 np.random.seed(seed)
                 patch_mask_decoded = self.augmentations(patch_mask_decoded)
                 
-            batch_X.append(patch_img)
-            batch_Y.append(patch_mask_decoded)
+            batch_X.append(patch_img.astype(np.float32))
+            batch_Y.append(patch_mask_decoded.astype(np.float32))
             
-        return np.array(batch_X), np.array(batch_Y)
+        return np.array(batch_X, dtype=np.float32), np.array(batch_Y, dtype=np.float32)
 
