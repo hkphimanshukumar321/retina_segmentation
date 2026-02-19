@@ -199,6 +199,31 @@ def main(quick_test: bool = False):
 
     print(f"[*] Train batches: {len(train_gen)},  Val batches: {len(val_gen)}")
 
+    # ---- Data Sanity Check (Professional Verification) ----
+    print("\n" + "-" * 40)
+    print("  DATA SANITY CHECK")
+    print("-" * 40)
+    try:
+        # Fetch one batch
+        X_sample, Y_sample = train_gen[0] # (B, H, W, 3), (B, H, W, 5)
+        print(f"[*] Sample Batch Shape: Input {X_sample.shape}, Target {Y_sample.shape}")
+        
+        # Check Value Ranges
+        print(f"[*] Input Range       : [{X_sample.min():.2f}, {X_sample.max():.2f}] (Expected 0.0-1.0)")
+        
+        # Check Class Distribution in this batch
+        # Y_sample is (B, H, W, 5)
+        total_pixels = Y_sample.size
+        print("[*] Target Class Distribution (Pixels):")
+        for i, name in enumerate(CLASS_NAMES):
+            count = Y_sample[..., i].sum()
+            ratio = (count / (X_sample.shape[0]*X_sample.shape[1]*X_sample.shape[2])) * 100
+            print(f"    - {name}: {int(count)} pixels ({ratio:.2f}%)")
+            
+        print("-" * 40 + "\n")
+    except Exception as e:
+        print(f"[WARN] Sanity check failed: {e}")
+
     # ---- Model (v2) ----
     model_fn = SEGMENTATION_MODELS["ghost_cas_unet_v2"]
     model = model_fn(
@@ -278,11 +303,13 @@ def main(quick_test: bool = False):
             # Format output
             msg = f"Epoch {epoch+1}/{self.params['epochs']}"
             msg += f" - loss: {display_logs.get('loss', 0):.4f}"
+            msg += f" - acc: {display_logs.get('accuracy', 0):.4f}"
             msg += f" - iou: {display_logs.get('iou_score', 0):.4f}"
             msg += f" - dice: {display_logs.get('dice_score', 0):.4f}"
             
             if 'val_loss' in display_logs:
                 msg += f" | val_loss: {display_logs['val_loss']:.4f}"
+                msg += f" - val_acc: {display_logs.get('val_accuracy', 0):.4f}"
                 msg += f" - val_iou: {display_logs.get('val_iou_score', 0):.4f}"
                 msg += f" - val_dice: {display_logs.get('val_dice_score', 0):.4f}"
             
