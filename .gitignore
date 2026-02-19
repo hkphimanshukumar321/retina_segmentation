@@ -9,12 +9,8 @@ venv/
 .ipynb_checkpoints/
 
 # Data
-data/
 *.zip
 *.tar.gz
-*.tif
-*.jpg
-*.png
 
 # Logs and Results
 segmentation/logs/
