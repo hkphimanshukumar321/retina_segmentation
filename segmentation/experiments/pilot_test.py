@@ -55,6 +55,8 @@ from common.data_loader import (
     RandomContrast, RandomElasticDeform,
     decode_labelmap
 )
+from segmentation.src.idrid_loader import IDRIDPatchDataGenerator
+from segmentation.src.metrics import DiceScore, IoUScore
 from segmentation.src.models import SEGMENTATION_MODELS
 from segmentation.src.losses import combined_loss_v2
 from segmentation.experiments.run_iou_analysis import (
@@ -68,11 +70,10 @@ logger = logging.getLogger("pilot_test")
 # ===========================================================================
 SEED          = 42
 IMG_SIZE      = (256, 256)      # v2: 256 for MA visibility
-NUM_CLASSES   = 3
-# Refined IDRiD label IDs (Table 2 from dataset paper):
-#   HE (Hemorrhage) = 127,  EX (Hard Exudate) = 63,  MA (Microaneurysm) = 255
-LABEL_IDS     = (127, 63, 255)
-CLASS_NAMES   = ("HE", "EX", "MA")
+NUM_CLASSES   = 5
+# IDRiD Classes: MA, HE, EX, SE, OD
+LABEL_IDS     = (255, 127, 63)  # Only MA, HE, EX present in local val data
+CLASS_NAMES   = ("MA", "HE", "EX", "SE", "OD")
 ENCODER_FILTERS = [32, 64, 128, 256]   # v2: wider for capacity
 GHOST_RATIO   = 2
 USE_SKIP_ATTN = True          # Ghost‑CAS‑UNet
@@ -94,7 +95,7 @@ class _PilotConfig:
     """Minimal config duck‑type expected by PatchDataGenerator."""
     class data:
         img_size   = IMG_SIZE
-        label_ids  = LABEL_IDS   # correct Refined IDRiD label IDs
+        label_ids  = LABEL_IDS   # Used for validation
         bit_values = None        # not used (triggers decode_labelmap path)
         prob_lesion = 0.5        # 50% chance to center on lesion
     class model:
@@ -162,11 +163,15 @@ def main(quick_test: bool = False):
     )
     print(f"[*] Dataset: {len(image_files)} images")
 
-    split_idx   = int(len(image_files) * 0.8)
-    train_imgs  = image_files[:split_idx]
-    val_imgs    = image_files[split_idx:]
-    train_masks = mask_files[:split_idx]
-    val_masks   = mask_files[split_idx:]
+    # Use all local data for validation (since we train on IDRID)
+    val_imgs    = image_files
+    val_masks   = mask_files
+    
+    # IDRID Training Data
+    idrid_root = ROOT_DIR / "data" / "IDRID" / "A. Segmentation"
+    idrid_train_imgs = idrid_root / "1. Original Images" / "a. Training Set"
+    idrid_train_masks = idrid_root / "2. All Segmentation Groundtruths" / "a. Training Set"
+
 
     config = _PilotConfig()
 
@@ -178,11 +183,12 @@ def main(quick_test: bool = False):
         RandomElasticDeform(alpha=50, sigma=5, p=0.3),
     ])
 
-    train_gen = PatchDataGenerator(
-        train_imgs, train_masks, config,
+    # Train on IDRID
+    train_gen = IDRIDPatchDataGenerator(
+        idrid_train_imgs, idrid_train_masks, config,
         patches_per_image=patches_tr,
         batch_size=BATCH_SIZE,
-        augmentitons=train_augs,
+        augmentations=train_augs,
     )
     val_gen = PatchDataGenerator(
         val_imgs, val_masks, config,
@@ -232,12 +238,14 @@ def main(quick_test: bool = False):
             optimizer=optimizer,
             loss=loss_dict,
             loss_weights=loss_weights,
-            metrics={'main_out': ['accuracy']},
+            metrics={
+                'main_out': ['accuracy', DiceScore(num_classes=NUM_CLASSES), IoUScore(num_classes=NUM_CLASSES)]
+            },
         )
     else:
         model.compile(
             optimizer=optimizer, loss=loss_fn,
-            metrics=['accuracy'],
+            metrics=['accuracy', DiceScore(num_classes=NUM_CLASSES), IoUScore(num_classes=NUM_CLASSES)],
         )
 
     model.summary()
