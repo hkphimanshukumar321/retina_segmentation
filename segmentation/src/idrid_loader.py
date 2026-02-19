@@ -81,6 +81,30 @@ class IDRIDPatchDataGenerator(PatchDataGenerator):
         )
         
         self.patch_size = config.data.img_size
+        
+        # --- RAM Optimization: Cache Everything ---
+        self.cache = {}
+        logger.info(f"Pre-loading {len(self.image_paths)} IDRID samples into RAM...")
+        
+        for i, img_path in enumerate(self.image_paths):
+            img_stem = img_path.stem
+            
+            # Load Image
+            img = cv2.imread(str(img_path))
+            if img is None:
+                logger.warning(f"Failed to load {img_path}")
+                continue
+            
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = img.astype(np.float32) / 255.0
+            
+            # Load Merged Mask (H, W, 5)
+            h, w = img.shape[:2]
+            full_mask = self._load_merged_mask(img_stem, (h, w))
+            
+            self.cache[i] = (img, full_mask)
+            
+        logger.info("IDRID Cache complete.")
 
     def __getitem__(self, index):
         """Generate one batch of data"""
@@ -137,22 +161,13 @@ class IDRIDPatchDataGenerator(PatchDataGenerator):
             # Map flattened index back to image index
             img_idx = i // self.patches_per_image
             
-            img_path = self.image_paths[img_idx]
-            img_stem = img_path.stem  # e.g. "IDRiD_01"
-            
-            # Load Image
-            img = cv2.imread(str(img_path))
-            if img is None:
+            # RAM Optimization: Retrieve from cache
+            if img_idx not in self.cache:
                 continue
-            
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img = img.astype(np.float32) / 255.0
+                
+            img, full_mask = self.cache[img_idx]
             h, w = img.shape[:2]
-            
-            # Load Merged Mask
-            # Mask shape: (H, W, 5)
-            full_mask = self._load_merged_mask(img_stem, (h, w))
-            
+
             # --- PATCH EXTRACTION (Adapted from parent) ---
             ph, pw = self.patch_size
             
