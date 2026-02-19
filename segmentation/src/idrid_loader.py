@@ -82,73 +82,60 @@ class IDRIDPatchDataGenerator(PatchDataGenerator):
         
         self.patch_size = config.data.img_size
         
-        # --- RAM Optimization: Cache Everything ---
-        self.cache = {}
+        # --- RAM Optimization: Cache Everything (UINT8) ---
+        self.cache_x = {}
+        self.cache_y = {}
         logger.info(f"Pre-loading {len(self.image_paths)} IDRID samples into RAM...")
         
         for i, img_path in enumerate(self.image_paths):
             img_stem = img_path.stem
             
-            # Load Image
+            # Load Image (Keep as uint8 to save RAM! 4x savings)
             img = cv2.imread(str(img_path))
             if img is None:
                 logger.warning(f"Failed to load {img_path}")
                 continue
             
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img = img.astype(np.float32) / 255.0
+            # stored as (H, W, 3) uint8
             
-            # Load Merged Mask (H, W, 5)
+            # Load Merged Mask (H, W, 5) -> uint8
             h, w = img.shape[:2]
             full_mask = self._load_merged_mask(img_stem, (h, w))
+            # stored as (H, W, 5) uint8 (0 or 1)
             
-            self.cache[i] = (img, full_mask)
+            self.cache_x[i] = img
+            self.cache_y[i] = full_mask
             
         logger.info("IDRID Cache complete.")
 
     def __getitem__(self, index):
         """Generate one batch of data"""
-        # Generate indices of the batch
         batch_indices = self.indices[index*self.batch_size:(index+1)*self.batch_size]
-        
-        # Generate data
         X, y = self._data_generation(batch_indices)
         return X, y
 
     def _load_merged_mask(self, img_stem: str, original_shape: Tuple[int, int]) -> np.ndarray:
         """
         Load masks for all 5 classes and merge into (H, W, 5).
-        
-        Args:
-            img_stem: Filename stem like 'IDRiD_01'
-            original_shape: (H, W) of the corresponding image
+        Returns uint8 to save memory.
         """
         h, w = original_shape
-        merged_mask = np.zeros((h, w, 5), dtype=np.float32)
+        merged_mask = np.zeros((h, w, 5), dtype=np.uint8)
         
         for i, (subfolder, suffix) in enumerate(zip(self.SUBFOLDERS, self.SUFFIXES)):
-            # IDRID convention: IDRiD_01.jpg -> IDRiD_01_MA.tif
             mask_name = f"{img_stem}{suffix}.tif"
             mask_path = self.mask_root_dir / subfolder / mask_name
             
             if mask_path.exists():
-                # Load mask
                 m = cv2.imread(str(mask_path), cv2.IMREAD_GRAYSCALE)
-                if m is None:
-                    # corrupted or unreadable
-                    continue
+                if m is None: continue
                 
-                # Resize if differs from image (should not happen in IDRID usually)
                 if m.shape != (h, w):
                     m = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
                 
-                # Binarize and assign to channel i
-                # IDRID masks are 0/255 usually, sometimes labeled.
-                # safely assume > 0 is foreground
-                merged_mask[..., i] = (m > 0).astype(np.float32)
-            else:
-                # File missing means empty mask for this class (e.g. no Hemorrhages in this image)
-                pass
+                # Binarize and assign
+                merged_mask[..., i] = (m > 0).astype(np.uint8)
                 
         return merged_mask
 
@@ -158,34 +145,46 @@ class IDRIDPatchDataGenerator(PatchDataGenerator):
         batch_Y = []
         
         for i in batch_indices:
-            # Map flattened index back to image index
             img_idx = i // self.patches_per_image
             
-            # RAM Optimization: Retrieve from cache
-            if img_idx not in self.cache:
+            # RAM Optimization: Retrieve from cache (uint8)
+            if img_idx not in self.cache_x:
                 continue
                 
-            img, full_mask = self.cache[img_idx]
-            h, w = img.shape[:2]
-
-            # --- PATCH EXTRACTION (Adapted from parent) ---
+            img_uint8 = self.cache_x[img_idx]
+            mask_uint8 = self.cache_y[img_idx]
+            
+            # Convert to float32 only for the current patch (or full img if needed)
+            # Logic: extracting patch from uint8 is faster, then convert.
+            # BUT: Augmentations might expect float or uint8.
+            # Standard albumentations handles uint8 fine.
+            # Our custom pipeline handles numpy arrays.
+            
+            h, w = img_uint8.shape[:2]
             ph, pw = self.patch_size
             
-            # Safeguard resize
+            # Resize full image if smaller than patch (rare)
+            # Need to operate on copies if we resize!
+            # Since we cache ref, do NOT modify img_uint8 in place.
+            
+            # If resize needed (very rare for IDRID which is huge)
+            valid_hw = True
             if h < ph or w < pw:
                 scale = max(ph / h, pw / w) + 0.01
-                img = cv2.resize(img, (int(w * scale), int(h * scale)))
-                full_mask = cv2.resize(full_mask, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_NEAREST)
-                h, w = img.shape[:2]
-                
-            # Lesion-aware sampling
+                # Resize creates copy, safe
+                img_proc = cv2.resize(img_uint8, (int(w * scale), int(h * scale)))
+                mask_proc = cv2.resize(mask_uint8, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_NEAREST)
+                h, w = img_proc.shape[:2]
+            else:
+                img_proc = img_uint8
+                mask_proc = mask_uint8
+
+            # Lesion-aware sampling on UINT8 mask
             prob_lesion = getattr(self.config.data, 'prob_lesion', 0.5)
             use_lesion_center = False
             
             if np.random.random() < prob_lesion:
-                # Any class active
-                # full_mask is (H, W, 5), sum over channels to find any lesion
-                lesion_map = full_mask.sum(axis=-1) > 0
+                lesion_map = mask_proc.sum(axis=-1) > 0
                 ys, xs = np.where(lesion_map)
                 
                 if len(ys) > 0:
@@ -208,20 +207,20 @@ class IDRIDPatchDataGenerator(PatchDataGenerator):
                 y = np.random.randint(0, max(1, h - ph))
                 x = np.random.randint(0, max(1, w - pw))
                 
-            patch_img = img[y:y+ph, x:x+pw]
-            patch_mask = full_mask[y:y+ph, x:x+pw]
+            patch_img = img_proc[y:y+ph, x:x+pw]
+            patch_mask = mask_proc[y:y+ph, x:x+pw]
             
-            # Augmentation
+            # Augmentation (on uint8)
             if self.augmentations:
                 seed = np.random.randint(0, 2**31)
                 np.random.seed(seed)
                 patch_img = self.augmentations(patch_img)
                 np.random.seed(seed)
-                # mask is (H, W, 5), simple affine transforms work fine on multi-channel
                 patch_mask = self.augmentations(patch_mask)
-                
-            batch_X.append(patch_img.astype(np.float32))
-            batch_Y.append(patch_mask.astype(np.float32))
+            
+            # Final conversion to float32 and normalize
+            batch_X.append(patch_img.astype(np.float32) / 255.0)
+            batch_Y.append(patch_mask.astype(np.float32)) # 0.0 or 1.0
             
         return np.array(batch_X, dtype=np.float32), np.array(batch_Y, dtype=np.float32)
 

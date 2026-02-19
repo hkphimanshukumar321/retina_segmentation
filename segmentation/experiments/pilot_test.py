@@ -251,16 +251,51 @@ def main(quick_test: bool = False):
     model.summary()
     total_params = model.count_params()
 
+    # ---- Custom Callback for Clean Logging ----
+    class SimpleLogger(tf.keras.callbacks.Callback):
+        def on_epoch_end(self, epoch, logs=None):
+            logs = logs or {}
+            # Filter and rename keys for display
+            display_logs = {}
+            for k, v in logs.items():
+                if "val_" in k:
+                    prefix = "val_"
+                    base = k[4:]
+                else:
+                    prefix = ""
+                    base = k
+                
+                # Simplify names: main_out_iou_score -> iou
+                if "main_out_" in base:
+                    clean_name = base.replace("main_out_", "")
+                elif "aux" in base:
+                    continue # Skip aux metrics
+                else:
+                    clean_name = base
+                
+                display_logs[prefix + clean_name] = v
+            
+            # Format output
+            msg = f"Epoch {epoch+1}/{self.params['epochs']}"
+            msg += f" - loss: {display_logs.get('loss', 0):.4f}"
+            msg += f" - iou: {display_logs.get('iou_score', 0):.4f}"
+            msg += f" - dice: {display_logs.get('dice_score', 0):.4f}"
+            
+            if 'val_loss' in display_logs:
+                msg += f" | val_loss: {display_logs['val_loss']:.4f}"
+                msg += f" - val_iou: {display_logs.get('val_iou_score', 0):.4f}"
+                msg += f" - val_dice: {display_logs.get('val_dice_score', 0):.4f}"
+            
+            print(msg)
+
     # ---- Callbacks ----
-    # NOTE: save_weights_only=True avoids Keras-format 'options' arg error
-    #       on older TF versions. We save the full model manually after training.
     callbacks = [
         tf.keras.callbacks.ModelCheckpoint(
             filepath=str(results_dir / "pilot_best.weights.h5"),
             monitor="val_loss",
             save_best_only=True,
             save_weights_only=True,
-            verbose=1,
+            verbose=0, # Quiet
         ),
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor="val_loss", factor=0.5, patience=5, min_lr=1e-6, verbose=1,
@@ -269,6 +304,7 @@ def main(quick_test: bool = False):
             monitor="val_loss", patience=10, restore_best_weights=True, verbose=1,
         ),
         tf.keras.callbacks.CSVLogger(str(results_dir / "pilot_training_log.csv")),
+        SimpleLogger() # Add custom logger
     ]
 
     # ---- Deep supervision wrapper: generators must yield (X, [Y, Y, Y]) ----
@@ -314,6 +350,7 @@ def main(quick_test: bool = False):
 
     # ---- Training ----
     t0 = time.time()
+    # verbose=0 to hide default messy bars, let SimpleLogger print clean stats
     history = model.fit(
         train_data,
         validation_data=val_data,
@@ -321,7 +358,7 @@ def main(quick_test: bool = False):
         steps_per_epoch=steps_per_epoch,
         validation_steps=validation_steps,
         callbacks=callbacks,
-        verbose=1,
+        verbose=0, 
     )
     train_time = time.time() - t0
 
