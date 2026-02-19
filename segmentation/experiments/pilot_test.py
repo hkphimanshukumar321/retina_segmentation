@@ -348,25 +348,67 @@ def main(quick_test: bool = False):
             print(f"[WARN] Full model save failed ({e2}). Weights saved successfully.")
             model_path = weights_path  # fallback for metrics reporting
 
-    # ---- Evaluate (IoU + Dice on val set) using CORRECTED metrics ----
-    print("\n[*] Evaluating on validation set (threshold-based, no argmax) …")
+    # -----------------------------------------------------------------------
+    # VALIDATION (Local Data) - Already done during training, but let's summarize
+    # -----------------------------------------------------------------------
+    print("\n[*] Evaluating on Validation Set (Local Data) …")
+    # ... (existing val logic) ...
     y_true_list, y_pred_list = [], []
     for batch_x, batch_y in val_gen:
         y_true_list.append(batch_y)
         preds = model.predict(batch_x, verbose=0)
-        # Deep supervision: model returns [main_out, aux1, aux2] — use main_out only
-        if isinstance(preds, list):
-            preds = preds[0]
+        if isinstance(preds, list): preds = preds[0]
         y_pred_list.append(preds)
 
-    y_true = np.concatenate(y_true_list)
-    y_pred = np.concatenate(y_pred_list)
+    y_true_val = np.concatenate(y_true_list)
+    y_pred_val = np.concatenate(y_pred_list)
 
-    class_names = list(CLASS_NAMES)
-    iou_scores   = compute_iou(y_true, y_pred, NUM_CLASSES)
-    dice_scores  = compute_dice(y_true, y_pred, NUM_CLASSES)
-    clinical     = compute_clinical_metrics(y_true, y_pred, NUM_CLASSES)
-    pos_iou      = compute_positive_only_iou(y_true, y_pred, NUM_CLASSES)
+    val_iou  = compute_iou(y_true_val, y_pred_val, NUM_CLASSES)
+    val_dice = compute_dice(y_true_val, y_pred_val, NUM_CLASSES)
+    
+    # -----------------------------------------------------------------------
+    # TESTING (IDRID Data) - New Phase
+    # -----------------------------------------------------------------------
+    print("\n\n" + "=" * 60)
+    print("  TESTING PHASE — IDRID Test Set")
+    print("=" * 60)
+    
+    idrid_test_imgs = idrid_root / "1. Original Images" / "b. Testing Set"
+    idrid_test_masks = idrid_root / "2. All Segmentation Groundtruths" / "b. Testing Set"
+    
+    # Check if test set exists (it should)
+    if not idrid_test_imgs.exists():
+        print(f"[WARN] IDRID Test Set not found at {idrid_test_imgs}. Skipping Test Phase.")
+        test_iou = {}
+        test_dice = {}
+    else:
+        # IDRID Test Generator (Same structure as Train)
+        # 1 patch per image for testing? Or slide? 
+        # For pilot, let's use the same patch logic but maybe fewer patches or full image if possible.
+        # Given generic generator, we stick to patches for consistent metrics.
+        patches_test = 5 if quick_test else 20 # reasonable sample
+        
+        test_gen = IDRIDPatchDataGenerator(
+            idrid_test_imgs, idrid_test_masks, config,
+            patches_per_image=patches_test,
+            batch_size=BATCH_SIZE,
+            augmentations=None, # No augs for testing
+            check_files=True
+        )
+        print(f"[*] Test batches: {len(test_gen)}")
+        
+        y_true_list, y_pred_list = [], []
+        for batch_x, batch_y in test_gen:
+            y_true_list.append(batch_y)
+            preds = model.predict(batch_x, verbose=0)
+            if isinstance(preds, list): preds = preds[0]
+            y_pred_list.append(preds)
+            
+        y_true_test = np.concatenate(y_true_list)
+        y_pred_test = np.concatenate(y_pred_list)
+        
+        test_iou  = compute_iou(y_true_test, y_pred_test, NUM_CLASSES)
+        test_dice = compute_dice(y_true_test, y_pred_test, NUM_CLASSES)
 
     # ---- Summary ----
     metrics = {
@@ -390,9 +432,13 @@ def main(quick_test: bool = False):
             "model_size_mb": round(model_size_mb, 3),
             "model_path": str(model_path),
         },
-        "evaluation": {
-            "iou": {k: round(float(v), 4) for k, v in iou_scores.items()},
-            "dice": {k: round(float(v), 4) for k, v in dice_scores.items()},
+        "validation_local": {
+            "iou": {k: round(float(v), 4) for k, v in val_iou.items()},
+            "dice": {k: round(float(v), 4) for k, v in val_dice.items()},
+        },
+         "test_idrid": {
+            "iou": {k: round(float(v), 4) for k, v in test_iou.items()},
+            "dice": {k: round(float(v), 4) for k, v in test_dice.items()},
         },
     }
 
@@ -400,18 +446,30 @@ def main(quick_test: bool = False):
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
 
+    class_names = list(CLASS_NAMES)
+    
     print("\n" + "=" * 60)
-    print("  PILOT TEST — RESULTS")
+    print("  PILOT TEST — RESULTS (Validation: Local)")
     print("=" * 60)
     for i, name in enumerate(class_names):
-        iou  = iou_scores[f"iou_class_{i}"]
-        dice = dice_scores[f"dice_class_{i}"]
+        # Validation might have NaNs for missing classes (SE, OD)
+        iou  = val_iou.get(f"iou_class_{i}", float("nan"))
+        dice = val_dice.get(f"dice_class_{i}", float("nan"))
         print(f"  {name:15s}  |  IoU: {iou:.4f}  |  Dice: {dice:.4f}")
-    print(f"\n  Mean IoU  : {iou_scores['mean_iou']:.4f}")
-    print(f"  Mean Dice : {dice_scores['mean_dice']:.4f}")
-    print(f"  Params    : {total_params:,}")
-    print(f"  Model Size: {model_size_mb:.2f} MB")
-    print(f"  Train Time: {train_time:.0f}s")
+    print(f"\n  Mean IoU  : {val_iou['mean_iou']:.4f}")
+    print(f"  Mean Dice : {val_dice['mean_dice']:.4f}")
+    
+    if idrid_test_imgs.exists():
+        print("\n" + "=" * 60)
+        print("  PILOT TEST — RESULTS (Testing: IDRID)")
+        print("=" * 60)
+        for i, name in enumerate(class_names):
+            iou  = test_iou.get(f"iou_class_{i}", float("nan"))
+            dice = test_dice.get(f"dice_class_{i}", float("nan"))
+            print(f"  {name:15s}  |  IoU: {iou:.4f}  |  Dice: {dice:.4f}")
+        print(f"\n  Mean IoU  : {test_iou['mean_iou']:.4f}")
+        print(f"  Mean Dice : {test_dice['mean_dice']:.4f}")
+
     print("=" * 60)
     print(f"\n  Metrics   → {metrics_path}")
     print(f"  Model     → {model_path}")
