@@ -152,6 +152,7 @@ class SegmentationAblationConfig:
     decoder_filters: List[List[int]] = field(default_factory=lambda: [[64, 32], [128, 64, 32]])
     skip_connections: List[bool] = field(default_factory=lambda: [True, False])
     loss_functions: List[str] = field(default_factory=lambda: ["dice", "focal", "ce"])
+    resolutions: List[int] = field(default_factory=lambda: [128, 256, 512])
 
 
 @dataclass

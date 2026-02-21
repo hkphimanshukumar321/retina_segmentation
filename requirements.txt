@@ -29,6 +29,9 @@ psutil>=5.8.0
 # gputil>=1.4.0
 # py3nvml>=0.2.6
 
+# Segmentation Baselines (pretrained encoders)
+segmentation-models>=1.0.1
+
 # Optional Tasks
 ultralytics>=8.0.0       # For YOLOv8/RT-DETR (Detection)
 segment-anything>=1.0    # For SAM (Segmentation)

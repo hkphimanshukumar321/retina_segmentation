@@ -1,92 +1,102 @@
-# Omni Workbench
+# Retina Segmentation — Ghost-CAS-UNet v2
 
+Lightweight semantic segmentation for **diabetic retinopathy lesion detection** on fundus images.
 
-Multi-task machine learning template supporting **Classification**, **Segmentation**, and **Detection**.
-
-## Choose Your Task
-
-| Task | Use Case | Go To |
-|------|----------|-------|
-| **Classification** | Categorize images into classes | [classification/](classification/) |
-| **Segmentation** | Pixel-level labeling (masks) | [segmentation/](segmentation/) |
-| **Detection** | Locate objects with bounding boxes | [detection/](detection/) |
+> **Architecture**: Ghost-CAS-UNet v2 — Ghost Modules + Coordinate Attention + Attention Gates + DW-ASPP + Deep Supervision
 
 ## Quick Start
 
 ```bash
-# 1. Install dependencies
+# 1. Install
 pip install -r requirements.txt
 
-# 2. Choose your task and run
-cd classification && python run.py --quick
-# OR
-cd segmentation && python run.py --quick
-# OR
-cd detection && python run.py --quick
+# 2. Train main model (Ghost-CAS-UNet v2)
+python segmentation/run.py --quick          # smoke test (1 epoch)
+python segmentation/run.py                  # full training
+
+# 3. Train baselines (DeepLabV3+, U-Net, LinkNet, FPN)
+pip install segmentation-models             # one-time
+python segmentation/run.py --baselines
+
+# 4. Run ablation study
+python segmentation/run.py --ablation
+
+# 5. Analyse & compare results
+python segmentation/analysis.py
+
+# 6. Export for edge deployment
+python segmentation/export_model.py --quantize float16
 ```
+
+## Architecture
+
+| Component | Role | Benefit |
+|-----------|------|---------|
+| **Ghost Module** | Replace standard conv → cheap linear ops | 2× parameter reduction |
+| **Coordinate Attention** | Channel + spatial attention in encoder | Better feature selection |
+| **Attention Gate** | Gate skip connections before fusion | Suppress noisy features |
+| **DW-ASPP** | Multi-scale depthwise convs at bottleneck | Capture lesions at all scales |
+| **Deep Supervision** | Auxiliary losses at decoder stages | Faster convergence |
 
 ## Directory Structure
 
 ```
-omni_workbench_MLsuite/
-├── common/                  # Shared utilities
-│   ├── experiments/         # Base experiment runners
-│   ├── data_loader.py       # Image loading & preprocessing
-│   ├── visualization.py     # Journal-quality plots
-│   ├── hardware.py          # GPU setup
-│   └── logger.py            # Experiment logging
+retina_scan/
+├── common/                     # Shared utilities
+│   ├── data_loader.py          # PatchDataGenerator, augmentations
+│   ├── ablation.py             # BaseAblationStudy framework
+│   ├── hardware.py             # GPU setup
+│   └── logger.py               # Logging
 │
-├── data/                    # [SHARED] Dataset Root
-│   ├── classification/      # -> Put class folders in 'raw/'
-│   ├── segmentation/        # -> Put 'images/' and 'masks/'
-│   └── detection/           # -> Put 'images/' and 'labels/'
+├── data/
+│   ├── segmentation/           # Local dataset (Images/ + Labels/)
+│   └── IDRID/                  # IDRiD dataset (auto-detected)
 │
-├── classification/          # Image Classification
-│   ├── README.md            # <- Start here
-│   ├── config.py
-│   ├── run.py
+├── segmentation/
+│   ├── config.py               # SegmentationConfig (central config)
+│   ├── run.py                  # Master runner (main/ablation/baselines)
+│   ├── baselines.py            # DeepLabV3+, U-Net, LinkNet, FPN
+│   ├── analysis.py             # Comparison tables, statistical tests
+│   ├── export_model.py         # TFLite / ONNX conversion
 │   ├── src/
-│   └── experiments/
-│
-├── segmentation/            # Semantic Segmentation
-│   ├── README.md            # <- Start here
-│   ├── config.py
-│   ├── run.py
-│   ├── src/
-│   └── experiments/
-│
-├── detection/               # Object Detection
-│   ├── README.md            # <- Start here
-│   ├── config.py
-│   ├── run.py
-│   ├── src/
-│   └── experiments/
+│   │   ├── models.py           # Ghost-CAS-UNet v2 + variants
+│   │   ├── losses.py           # Lovász-Softmax, Focal Tversky, Combined
+│   │   ├── metrics.py          # DiceScore, IoUScore
+│   │   └── idrid_loader.py     # IDRiD-specific data generator
+│   ├── experiments/
+│   │   ├── pilot_test.py       # Single experiment runner
+│   │   ├── benchmark_ghost.py  # Model efficiency benchmarks
+│   │   └── run_iou_analysis.py # Per-class metric analysis
+│   └── results/                # Training outputs
+│       ├── main_*              # Main model results
+│       ├── ablation/           # Ablation study results
+│       └── baselines/          # Baseline comparison results
 │
 └── requirements.txt
 ```
 
-## Workflow
+## Training Pipeline
 
-1. **Choose task** → Read the task-specific README
-2. **Prepare data** → Follow dataset format in README
-3. **Configure** → Edit `config.py` (paths, hyperparams)
-4. **Train** → Run `python run.py`
-5. **Evaluate** → Run experiments, compare baselines
-6. **Publish** → Generate journal-quality figures
+1. **Data** — Train on IDRiD (auto-downloaded), validate on local dataset
+2. **Train** — `run.py` with combined loss (Lovász + Focal Tversky + BCE)
+3. **Test** — Evaluate on IDRiD test set with per-class IoU/Dice/Sensitivity
+4. **Compare** — `analysis.py` generates LaTeX tables + Wilcoxon significance tests
+5. **Export** — `export_model.py` converts to TFLite with optional float16/int8 quantization
 
-## Common Features (All Tasks)
+## Baselines
 
-| Feature | Location | Description |
-|---------|----------|-------------|
-| Ablation Study | `common/experiments/` | Hyperparameter search |
-| Cross-Validation | `common/experiments/` | K-fold statistical validation |
-| Baseline Comparison | Task-specific | Compare with pretrained models |
-| Journal Plots | `common/visualization.py` | Radar, Pareto, confusion matrix |
-| GPU Setup | `common/hardware.py` | Auto-detect, multi-GPU |
+| Model | Encoder | Pretrained | Library |
+|-------|---------|------------|---------|
+| DeepLabV3+ | ResNet50 | ImageNet | tf.keras.applications |
+| U-Net | ResNet34 | ImageNet | segmentation-models |
+| LinkNet | ResNet34 | ImageNet | segmentation-models |
+| FPN | ResNet34 | ImageNet | segmentation-models |
 
 ## Requirements
 
 - Python 3.8+
 - TensorFlow 2.10+
-- NumPy, Pandas, Matplotlib, Seaborn
-- OpenCV, scikit-learn, tqdm
+- NumPy, Pandas, Matplotlib, Seaborn, scikit-learn
+- OpenCV, tqdm, psutil
+- `segmentation-models` (for baselines)
+- `scipy` (for statistical tests)
