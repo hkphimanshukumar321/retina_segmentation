@@ -28,9 +28,14 @@ Usage::
 import sys
 import os
 
-# Force UTF-8 on Windows — Keras outputs unicode box-drawing chars
-# that crash the default 'charmap' codec on Windows consoles
+# Server/A100 Optimization & Fixes
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+os.environ.setdefault("TF_GPU_ALLOCATOR", "cuda_malloc_async")
+os.environ.setdefault("TF_ENABLE_ONEDNN_OPTS", "0")
+# Disable problematic Grappler layout optimizer that often hangs on A100 MIG
+os.environ.setdefault("TF_GRAF_OPTIMIZER_JIT_COMPILE", "0")
+
 if sys.platform == "win32":
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -268,8 +273,55 @@ def _train_model(model, train_gen, val_gen, config, results_dir: Path,
 
     model.summary(print_fn=logger.info)
 
+    # --- Custom Logger ---
+    class SimpleLogger(tf.keras.callbacks.Callback):
+        def __init__(self):
+            super().__init__()
+            self.start_time = None
+            self.epoch_start_time = None
+            
+        def on_train_begin(self, logs=None):
+            self.start_time = time.time()
+            
+        def on_epoch_begin(self, epoch, logs=None):
+            self.epoch_start_time = time.time()
+            if self.start_time is None:
+                self.start_time = time.time()
+
+        def on_epoch_end(self, epoch, logs=None):
+            logs = logs or {}
+            epoch_time = time.time() - self.epoch_start_time
+            total_elapsed = time.time() - self.start_time
+            epochs_done = epoch + 1
+            total_epochs = self.params['epochs']
+            
+            avg_time_per_epoch = total_elapsed / epochs_done
+            eta_seconds = (total_epochs - epochs_done) * avg_time_per_epoch
+            eta_str = time.strftime('%H:%M:%S', time.gmtime(eta_seconds))
+            
+            display_logs = {}
+            for k, v in logs.items():
+                prefix = "val_" if "val_" in k else ""
+                base = k[4:] if "val_" in k else k
+                clean_name = base.replace("main_out_", "") if "main_out_" in base else base
+                if "aux" not in base:
+                    display_logs[prefix + clean_name] = v
+            
+            msg = f"Epoch {epochs_done}/{total_epochs} [{epoch_time:.0f}s, ETA: {eta_str}]"
+            msg += f" - loss: {display_logs.get('loss', 0):.4f}"
+            msg += f" - acc: {display_logs.get('accuracy', 0):.4f}"
+            msg += f" - iou: {display_logs.get('iou_score', 0):.4f}"
+            msg += f" - dice: {display_logs.get('dice_score', 0):.4f}"
+            if 'val_loss' in display_logs:
+                msg += f" | val_loss: {display_logs['val_loss']:.4f}"
+                msg += f" - val_acc: {display_logs.get('val_accuracy', 0):.4f}"
+                msg += f" - val_iou: {display_logs.get('val_iou_score', 0):.4f}"
+                msg += f" - val_dice: {display_logs.get('val_dice_score', 0):.4f}"
+            print(msg)
+
     # --- Callbacks ---
     callbacks = [
+        SimpleLogger(),
         tf.keras.callbacks.ModelCheckpoint(
             filepath=str(results_dir / f"{model_prefix}_best.weights.h5"),
             monitor="val_loss", save_best_only=True,
@@ -310,6 +362,7 @@ def _train_model(model, train_gen, val_gen, config, results_dir: Path,
 
     # --- Train ---
     t0 = time.time()
+    print(f"[*] Starting model.fit() at {time.ctime()}...", flush=True)
     try:
         history = model.fit(
             train_data,

@@ -80,7 +80,7 @@ USE_SKIP_ATTN = True          # Ghost‑CAS‑UNet
 DROPOUT       = 0.15
 LEARNING_RATE = 1e-3
 EPOCHS        = 50
-BATCH_SIZE    = 8
+BATCH_SIZE    = 4
 PATCHES_TRAIN = 100           # increased for more lesion exposure
 PATCHES_VAL   = 20
 DEEP_SUPERVISION = True       # v2: auxiliary loss heads
@@ -183,17 +183,22 @@ def main(quick_test: bool = False):
         RandomElasticDeform(alpha=50, sigma=5, p=0.3),
     ])
 
+    # ---- Distributed Strategy ----
+    strategy = tf.distribute.MirroredStrategy()
+    print(f"\n[*] Strategy: {strategy.num_replicas_in_sync} replicas in sync.")
+    global_batch_size = BATCH_SIZE * strategy.num_replicas_in_sync
+
     # Train on IDRID
     train_gen = IDRIDPatchDataGenerator(
         idrid_train_imgs, idrid_train_masks, config,
         patches_per_image=patches_tr,
-        batch_size=BATCH_SIZE,
+        batch_size=global_batch_size,
         augmentations=train_augs,
     )
     val_gen = PatchDataGenerator(
         val_imgs, val_masks, config,
         patches_per_image=patches_val,
-        batch_size=BATCH_SIZE,
+        batch_size=global_batch_size,
         augmentitons=None,
     )
 
@@ -225,61 +230,88 @@ def main(quick_test: bool = False):
         print(f"[WARN] Sanity check failed: {e}")
 
     # ---- Model (v2) ----
-    model_fn = SEGMENTATION_MODELS["ghost_cas_unet_v2"]
-    model = model_fn(
-        input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3),
-        num_classes=NUM_CLASSES,
-        encoder_filters=ENCODER_FILTERS,
-        dropout_rate=DROPOUT,
-        ghost_ratio=GHOST_RATIO,
-        use_skip_attention=USE_SKIP_ATTN,
-        use_aspp=USE_ASPP,
-        deep_supervision=DEEP_SUPERVISION,
-    )
-
-    optimizer = tf.keras.optimizers.Adam(
-        learning_rate=LEARNING_RATE, clipnorm=1.0
-    )
-
-    # v2 loss: Lovász-Softmax + Focal Tversky + BCE
-    loss_fn = combined_loss_v2(
-        w_lovasz=0.5, w_focal_tversky=0.3, w_bce=0.2,
-        ft_alpha=0.3, ft_beta=0.7, ft_gamma=0.75,
-    )
-
-    # For deep supervision: apply same loss to main + aux outputs with weights
-    if DEEP_SUPERVISION:
-        loss_dict = {
-            'main_out': loss_fn,
-            'aux_up_1': loss_fn,
-            'aux_up_2': loss_fn,
-        }
-        loss_weights = {
-            'main_out': 1.0,
-            'aux_up_1': 0.4,
-            'aux_up_2': 0.2,
-        }
-        model.compile(
-            optimizer=optimizer,
-            loss=loss_dict,
-            loss_weights=loss_weights,
-            metrics={
-                'main_out': ['accuracy', DiceScore(num_classes=NUM_CLASSES), IoUScore(num_classes=NUM_CLASSES)]
-            },
+    with strategy.scope():
+        model_fn = SEGMENTATION_MODELS["ghost_cas_unet_v2"]
+        model = model_fn(
+            input_shape=(IMG_SIZE[0], IMG_SIZE[1], 3),
+            num_classes=NUM_CLASSES,
+            encoder_filters=ENCODER_FILTERS,
+            dropout_rate=DROPOUT,
+            ghost_ratio=GHOST_RATIO,
+            use_skip_attention=USE_SKIP_ATTN,
+            use_aspp=USE_ASPP,
+            deep_supervision=DEEP_SUPERVISION,
         )
-    else:
-        model.compile(
-            optimizer=optimizer, loss=loss_fn,
-            metrics=['accuracy', DiceScore(num_classes=NUM_CLASSES), IoUScore(num_classes=NUM_CLASSES)],
+
+        optimizer = tf.keras.optimizers.Adam(
+            learning_rate=LEARNING_RATE, clipnorm=1.0
         )
+
+        # v2 loss: Lovász-Softmax + Focal Tversky + BCE
+        loss_fn = combined_loss_v2(
+            w_lovasz=0.5, w_focal_tversky=0.3, w_bce=0.2,
+            ft_alpha=0.3, ft_beta=0.7, ft_gamma=0.75,
+        )
+
+        # For deep supervision: apply same loss to main + aux outputs with weights
+        if DEEP_SUPERVISION:
+            loss_dict = {
+                'main_out': loss_fn,
+                'aux_up_1': loss_fn,
+                'aux_up_2': loss_fn,
+            }
+            loss_weights = {
+                'main_out': 1.0,
+                'aux_up_1': 0.4,
+                'aux_up_2': 0.2,
+            }
+            model.compile(
+                optimizer=optimizer,
+                loss=loss_dict,
+                loss_weights=loss_weights,
+                metrics={
+                    'main_out': ['accuracy', DiceScore(num_classes=NUM_CLASSES), IoUScore(num_classes=NUM_CLASSES)]
+                },
+            )
+        else:
+            model.compile(
+                optimizer=optimizer, loss=loss_fn,
+                metrics=['accuracy', DiceScore(num_classes=NUM_CLASSES), IoUScore(num_classes=NUM_CLASSES)],
+            )
 
     model.summary()
     total_params = model.count_params()
 
     # ---- Custom Callback for Clean Logging ----
     class SimpleLogger(tf.keras.callbacks.Callback):
+        def __init__(self):
+            super().__init__()
+            self.start_time = None
+            self.epoch_start_time = None
+            
+        def on_train_begin(self, logs=None):
+            self.start_time = time.time()
+            
+        def on_epoch_begin(self, epoch, logs=None):
+            self.epoch_start_time = time.time()
+            if self.start_time is None:  # Fallback if on_train_begin wasn't called properly
+                self.start_time = time.time()
+
         def on_epoch_end(self, epoch, logs=None):
             logs = logs or {}
+            
+            # Timing and ETA
+            epoch_time = time.time() - self.epoch_start_time
+            total_elapsed = time.time() - self.start_time
+            epochs_done = epoch + 1
+            total_epochs = self.params['epochs']
+            
+            avg_time_per_epoch = total_elapsed / epochs_done
+            epochs_remaining = total_epochs - epochs_done
+            eta_seconds = epochs_remaining * avg_time_per_epoch
+            
+            eta_str = time.strftime('%H:%M:%S', time.gmtime(eta_seconds))
+            
             # Filter and rename keys for display
             display_logs = {}
             for k, v in logs.items():
@@ -301,7 +333,8 @@ def main(quick_test: bool = False):
                 display_logs[prefix + clean_name] = v
             
             # Format output
-            msg = f"Epoch {epoch+1}/{self.params['epochs']}"
+            msg = f"Epoch {epochs_done}/{total_epochs}"
+            msg += f" [{epoch_time:.0f}s, ETA: {eta_str}]"
             msg += f" - loss: {display_logs.get('loss', 0):.4f}"
             msg += f" - acc: {display_logs.get('accuracy', 0):.4f}"
             msg += f" - iou: {display_logs.get('iou_score', 0):.4f}"
@@ -455,7 +488,7 @@ def main(quick_test: bool = False):
         test_gen = IDRIDPatchDataGenerator(
             idrid_test_imgs, idrid_test_masks, config,
             patches_per_image=patches_test,
-            batch_size=BATCH_SIZE,
+            batch_size=global_batch_size,
             augmentations=None, # No augs for testing
             check_files=True
         )
