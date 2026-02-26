@@ -48,18 +48,20 @@ sys.path.insert(0, str(SEG_DIR))
 # ===========================================================================
 # Defaults (must match pilot_test.py sweet-spot config)
 # ===========================================================================
-DEFAULT_WEIGHTS   = SEG_DIR / "results" / "pilot" / "pilot_model.weights.h5"
-DEFAULT_KERAS     = SEG_DIR / "results" / "pilot" / "pilot_model.keras"
-DEFAULT_RESOLUTION = 128
+DEFAULT_WEIGHTS    = SEG_DIR / "results" / "pilot" / "pilot_model.weights.h5"
+DEFAULT_KERAS      = SEG_DIR / "results" / "pilot" / "pilot_model.keras"
+DEFAULT_RESOLUTION = 256   # Must match pilot_test.py IMG_SIZE
 DEFAULT_NUM_RUNS   = 100
 DEFAULT_WARMUP     = 10
 
-# Architecture config (matches pilot_test.py sweet-spot)
-NUM_CLASSES     = 3
-ENCODER_FILTERS = [16, 32, 64, 128]
+# Architecture config (must EXACTLY match pilot_test.py sweet-spot config)
+NUM_CLASSES     = 5                     # MA, HE, EX, SE, OD
+ENCODER_FILTERS = [32, 64, 128, 256]   # v2: wider filters
 GHOST_RATIO     = 2
 DROPOUT         = 0.15
 USE_SKIP_ATTN   = True
+USE_ASPP        = True
+DEEP_SUPERVISION = True
 
 
 def main(
@@ -103,7 +105,8 @@ def main(
     # ---- Rebuild model architecture ----
     from segmentation.src.models import SEGMENTATION_MODELS
 
-    model_fn = SEGMENTATION_MODELS["ghost_ca_unet"]
+    # FIX: must match pilot_test.py exactly — uses ghost_cas_unet_v2 with 5 classes
+    model_fn = SEGMENTATION_MODELS["ghost_cas_unet_v2"]
     model = model_fn(
         input_shape=(resolution, resolution, 3),
         num_classes=NUM_CLASSES,
@@ -111,6 +114,8 @@ def main(
         dropout_rate=DROPOUT,
         ghost_ratio=GHOST_RATIO,
         use_skip_attention=USE_SKIP_ATTN,
+        use_aspp=USE_ASPP,
+        deep_supervision=DEEP_SUPERVISION,
     )
 
     # ---- Load weights ----

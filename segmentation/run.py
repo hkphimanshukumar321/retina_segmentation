@@ -100,8 +100,13 @@ def set_seed(seed: int = 42):
 # =============================================================================
 
 def _resolve_data(config: SegmentationConfig):
-    """Locate image/mask files. When IDRID is available, use ALL local data
-    for validation (matching pilot_test.py behaviour).
+    """Locate image/mask files for training and validation.
+
+    Priority:
+      1. IDRID detected + val split exists → train on IDRID train split,
+         validate on IDRID val split (same 5-class distribution).  ← CORRECT
+      2. IDRID detected but no val split → raise RuntimeError with instructions.
+      3. No IDRID → 80/20 split on local data.
 
     Returns:
         (train_imgs, train_masks, val_imgs, val_masks, data_dir) or None
@@ -126,17 +131,31 @@ def _resolve_data(config: SegmentationConfig):
 
     # Check if IDRID training data is available
     idrid_root = root_dir / "data" / "IDRID" / "A. Segmentation"
-    idrid_train_imgs = idrid_root / "1. Original Images" / "a. Training Set"
-    use_idrid = idrid_train_imgs.exists()
+    idrid_train_imgs  = idrid_root / "1. Original Images"               / "a. Training Set"
+    idrid_val_imgs    = idrid_root / "1. Original Images"               / "a. Val Set"
+    idrid_train_masks = idrid_root / "2. All Segmentation Groundtruths" / "a. Training Set"
+    idrid_val_masks   = idrid_root / "2. All Segmentation Groundtruths" / "a. Val Set"
+    use_idrid = idrid_train_imgs.exists() and idrid_train_masks.exists()
 
     if use_idrid:
-        # IDRID trains -> use ALL local data for validation (no wasted data)
-        train_imgs, train_masks = [], []  # placeholder, _build_generators uses IDRID
-        val_imgs = image_files
-        val_masks = mask_files
-        logger.info(f"IDRID detected -> all {len(val_imgs)} local images used for validation")
+        # Require the val split — must run prepare_val_split.py first
+        if not idrid_val_imgs.exists():
+            raise RuntimeError(
+                f"IDRID val split not found: {idrid_val_imgs}\n"
+                f"Run first:  python segmentation/scripts/prepare_val_split.py"
+            )
+        # train/val both come from IDRID (same 5-class distribution)
+        # local data is NOT used for val — it would corrupt val_loss (only 3 classes)
+        train_imgs, train_masks = [], []  # placeholder; _build_generators uses IDRID paths
+        val_imgs   = []                   # placeholder; _build_generators uses IDRID val path
+        val_masks  = []
+        logger.info(
+            f"IDRID detected → training on IDRID train split, "
+            f"validating on IDRID val split (a. Val Set)."
+        )
+        logger.info(f"Local data ({len(image_files)} imgs) kept for post-training generalization only.")
     else:
-        # No IDRID -> 80/20 split on local data
+        # No IDRID → 80/20 split on local data
         split_idx = int(len(image_files) * 0.8)
         train_imgs, val_imgs = image_files[:split_idx], image_files[split_idx:]
         train_masks, val_masks = mask_files[:split_idx], mask_files[split_idx:]
@@ -156,8 +175,10 @@ def _build_generators(train_imgs, train_masks, val_imgs, val_masks, config,
 
     # Check for IDRID dataset (preferred for training)
     idrid_root = root_dir / "data" / "IDRID" / "A. Segmentation"
-    idrid_train_imgs = idrid_root / "1. Original Images" / "a. Training Set"
+    idrid_train_imgs  = idrid_root / "1. Original Images"               / "a. Training Set"
     idrid_train_masks = idrid_root / "2. All Segmentation Groundtruths" / "a. Training Set"
+    idrid_val_imgs    = idrid_root / "1. Original Images"               / "a. Val Set"
+    idrid_val_masks   = idrid_root / "2. All Segmentation Groundtruths" / "a. Val Set"
     use_idrid = idrid_train_imgs.exists() and idrid_train_masks.exists()
 
     train_augs = AugmentationPipeline([
@@ -168,7 +189,7 @@ def _build_generators(train_imgs, train_masks, val_imgs, val_masks, config,
         RandomElasticDeform(alpha=50, sigma=5, p=0.3),
     ])
 
-    patches_tr = 2 if quick_test else config.training.patches_per_image
+    patches_tr  = 2 if quick_test else config.training.patches_per_image
     patches_val = 2 if quick_test else config.training.patches_per_image_val
 
     if use_idrid:
@@ -180,6 +201,15 @@ def _build_generators(train_imgs, train_masks, val_imgs, val_masks, config,
             batch_size=config.training.batch_size,
             augmentations=train_augs,
         )
+        # Val also on IDRID val split — same 5-class distribution as training
+        # This is critical for EarlyStopping to work correctly.
+        logger.info("Using IDRID val split for validation (same 5-class distribution).")
+        val_gen = IDRIDPatchDataGenerator(
+            idrid_val_imgs, idrid_val_masks, config,
+            patches_per_image=patches_val,
+            batch_size=config.training.batch_size,
+            augmentations=None,
+        )
     else:
         logger.info("Using local dataset for training.")
         train_gen = PatchDataGenerator(
@@ -188,13 +218,12 @@ def _build_generators(train_imgs, train_masks, val_imgs, val_masks, config,
             batch_size=config.training.batch_size,
             augmentitons=train_augs,
         )
-
-    val_gen = PatchDataGenerator(
-        val_imgs, val_masks, config,
-        patches_per_image=patches_val,
-        batch_size=config.training.batch_size,
-        augmentitons=None,
-    )
+        val_gen = PatchDataGenerator(
+            val_imgs, val_masks, config,
+            patches_per_image=patches_val,
+            batch_size=config.training.batch_size,
+            augmentitons=None,
+        )
 
     return train_gen, val_gen
 
@@ -403,6 +432,7 @@ def _train_model(model, train_gen, val_gen, config, results_dir: Path,
 def _evaluate_test(model, config, results_dir: Path, model_name: str,
                    quick_test: bool = False) -> Optional[Dict]:
     """Run test evaluation on IDRID test set. Returns metrics dict or None."""
+    import math
     from segmentation.experiments.run_iou_analysis import (
         compute_iou, compute_dice, compute_clinical_metrics,
     )
@@ -429,9 +459,10 @@ def _evaluate_test(model, config, results_dir: Path, model_name: str,
     y_pred = np.concatenate(y_pred_list)
 
     num_classes = config.model.num_classes
-    test_iou = compute_iou(y_true, y_pred, num_classes)
-    test_dice = compute_dice(y_true, y_pred, num_classes)
+    test_iou      = compute_iou(y_true, y_pred, num_classes)
+    test_dice     = compute_dice(y_true, y_pred, num_classes)
     test_clinical = compute_clinical_metrics(y_true, y_pred, num_classes)
+    # compute_clinical_metrics returns keys: sens_class_N, spec_class_N, prec_class_N
 
     # --- Confusion Matrix ---
     _save_confusion_matrix(y_true, y_pred, num_classes, results_dir, model_name)
@@ -439,24 +470,43 @@ def _evaluate_test(model, config, results_dir: Path, model_name: str,
     # --- Prediction Visualisation ---
     _save_prediction_samples(test_gen, model, results_dir, model_name, num_samples=4)
 
+    # --- NaN-safe helpers ---
+    def _fmt(v):
+        """Format float for printing; display 'nan' instead of crashing."""
+        try:
+            return f"{float(v):8.4f}" if not math.isnan(float(v)) else "     nan"
+        except Exception:
+            return "     err"
+
+    def _safe_round(d: dict) -> dict:
+        """Round floats for JSON; replace NaN with null (valid JSON)."""
+        out = {}
+        for k, v in d.items():
+            try:
+                out[k] = None if math.isnan(float(v)) else round(float(v), 4)
+            except Exception:
+                out[k] = v
+        return out
+
     # Print results
     print(f"\n  {'Class':15s}  |  {'IoU':>8s}  |  {'Dice':>8s}  |  {'Sens':>8s}  |  {'Prec':>8s}")
     print(f"  {'-'*60}")
     for i, name in enumerate(CLASS_NAMES[:num_classes]):
-        iou = test_iou.get(f"iou_class_{i}", float("nan"))
-        dice = test_dice.get(f"dice_class_{i}", float("nan"))
-        sens = test_clinical.get(f"sensitivity_class_{i}", float("nan"))
-        prec = test_clinical.get(f"precision_class_{i}", float("nan"))
-        print(f"  {name:15s}  |  {iou:8.4f}  |  {dice:8.4f}  |  {sens:8.4f}  |  {prec:8.4f}")
-    print(f"\n  Mean IoU  : {test_iou.get('mean_iou', float('nan')):.4f}")
-    print(f"  Mean Dice : {test_dice.get('mean_dice', float('nan')):.4f}")
+        iou  = test_iou.get(f"iou_class_{i}",    float("nan"))
+        dice = test_dice.get(f"dice_class_{i}",   float("nan"))
+        # FIX: correct key names from compute_clinical_metrics are sens_class_N / prec_class_N
+        sens = test_clinical.get(f"sens_class_{i}", float("nan"))
+        prec = test_clinical.get(f"prec_class_{i}", float("nan"))
+        print(f"  {name:15s}  |  {_fmt(iou)}  |  {_fmt(dice)}  |  {_fmt(sens)}  |  {_fmt(prec)}")
+    print(f"\n  Mean IoU  : {_fmt(test_iou.get('mean_iou', float('nan'))).strip()}")
+    print(f"  Mean Dice : {_fmt(test_dice.get('mean_dice', float('nan'))).strip()}")
 
-    # Save
+    # Save — NaN values become JSON null (Python None)
     metrics = {
         "model": model_name,
-        "iou": {k: round(float(v), 4) for k, v in test_iou.items()},
-        "dice": {k: round(float(v), 4) for k, v in test_dice.items()},
-        "clinical": {k: round(float(v), 4) for k, v in test_clinical.items()},
+        "iou":      _safe_round(test_iou),
+        "dice":     _safe_round(test_dice),
+        "clinical": _safe_round(test_clinical),
     }
     with open(results_dir / f"{model_name}_test_metrics.json", "w") as f:
         json.dump(metrics, f, indent=2)
@@ -805,9 +855,15 @@ def run_baselines(quick_test: bool = False) -> bool:
             num_classes=config.model.num_classes,
         )
 
+        # FIX: Rebuild generators for EACH baseline — generators have mutable shuffled
+        # index state (on_epoch_end). Sharing one pair across baselines corrupts sampling.
+        train_gen_b, val_gen_b = _build_generators(
+            train_imgs, train_masks, val_imgs, val_masks, config, quick_test
+        )
+
         baseline_dir = current_dir / "results" / "baselines" / name
         history, info = _train_model(
-            model, train_gen, val_gen, config, baseline_dir,
+            model, train_gen_b, val_gen_b, config, baseline_dir,
             quick_test=quick_test, model_prefix=name,
         )
 
@@ -819,7 +875,7 @@ def run_baselines(quick_test: bool = False) -> bool:
                 if "val_" in key and ("accuracy" in key or "iou" in key or "dice" in key):
                     result[key] = float(h[key][-1])
 
-            # --- TEST PHASE for baseline (FIX #4) ---
+            # --- TEST PHASE for baseline ---
             test_metrics = _evaluate_test(
                 model, config, baseline_dir, name, quick_test
             )
@@ -833,7 +889,7 @@ def run_baselines(quick_test: bool = False) -> bool:
     baselines_dir = current_dir / "results" / "baselines"
     baselines_dir.mkdir(parents=True, exist_ok=True)
     with open(baselines_dir / "baseline_results.json", "w") as f:
-        json.dump(all_results, f, indent=2)
+        json.dump(all_results, f, indent=2, default=lambda x: None if isinstance(x, float) and __import__('math').isnan(x) else x)
 
     print(f"\n[*] Baseline results saved to: {baselines_dir}")
     return True

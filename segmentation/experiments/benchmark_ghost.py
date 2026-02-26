@@ -107,7 +107,7 @@ def benchmark_model(name, model_fn, input_shape, num_classes, n_runs=50):
 
 def main():
     input_shape = (128, 128, 3)
-    num_classes = 3
+    num_classes = 5  # MA, HE, EX, SE, OD — match IDRID training setup
 
     results = []
     for name, model_fn in SEGMENTATION_MODELS.items():

@@ -81,9 +81,9 @@ USE_SKIP_ATTN = True          # Ghost‑CAS‑UNet
 DROPOUT       = 0.15
 LEARNING_RATE = 1e-3
 EPOCHS        = 50
-BATCH_SIZE    = 4
-PATCHES_TRAIN = 100           # increased for more lesion exposure
-PATCHES_VAL   = 20
+BATCH_SIZE    = 16
+PATCHES_TRAIN = 100           # patches per image for IDRID training (43 imgs)
+PATCHES_VAL   = 30            # patches per image for IDRID val split (11 imgs)
 DEEP_SUPERVISION = True       # v2: auxiliary loss heads
 USE_ASPP      = True          # v2: multi-scale bottleneck
 
@@ -142,7 +142,7 @@ def main(quick_test: bool = False):
 
     epochs       = 1 if quick_test else EPOCHS
     patches_tr   = 2 if quick_test else PATCHES_TRAIN
-    patches_val  = 2 if quick_test else PATCHES_VAL
+    patches_val  = 2 if quick_test else PATCHES_VAL   # IDRID val split
 
     print("\n" + "=" * 60)
     print("  PILOT TEST — Ghost‑CAS‑UNet")
@@ -158,28 +158,35 @@ def main(quick_test: bool = False):
     print(f"  Quick test   : {quick_test}")
     print("=" * 60 + "\n")
 
-    # ---- Data ----
-    data_dir = ROOT_DIR / "data" / "segmentation"
-    img_dir  = "Images" if (data_dir / "Images").exists() else "images"
-    mask_dir = "Labels" if (data_dir / "Labels").exists() else "masks"
-
-    image_files = sorted(list((data_dir / img_dir).glob("*.[jp][pn][g]")))
-    mask_files  = sorted(list((data_dir / mask_dir).glob("*.[jp][pn][g]")))
-
-    assert len(image_files) == len(mask_files), (
-        f"Image/mask count mismatch: {len(image_files)} vs {len(mask_files)}"
-    )
-    print(f"[*] Dataset: {len(image_files)} images")
-
-    # Use all local data for validation (since we train on IDRID)
-    val_imgs    = image_files
-    val_masks   = mask_files
-    
-    # IDRID Training Data
+    # ---- IDRID Dataset Paths ----
     idrid_root = ROOT_DIR / "data" / "IDRID" / "A. Segmentation"
-    idrid_train_imgs = idrid_root / "1. Original Images" / "a. Training Set"
+
+    # Training split:  IDRiD_01 – IDRiD_43 (43 imgs, 5 classes)
+    idrid_train_imgs  = idrid_root / "1. Original Images"               / "a. Training Set"
     idrid_train_masks = idrid_root / "2. All Segmentation Groundtruths" / "a. Training Set"
 
+    # Validation split: IDRiD_44 – IDRiD_54 (11 imgs, 5 classes)
+    # Created by: python segmentation/scripts/prepare_val_split.py
+    idrid_val_imgs    = idrid_root / "1. Original Images"               / "a. Val Set"
+    idrid_val_masks   = idrid_root / "2. All Segmentation Groundtruths" / "a. Val Set"
+
+    # Local data (for post-training generalization test only — 3 classes: MA, HE, EX)
+    local_data_dir = ROOT_DIR / "data" / "segmentation"
+    local_img_dir  = "Images" if (local_data_dir / "Images").exists() else "images"
+    local_mask_dir = "Labels" if (local_data_dir / "Labels").exists() else "masks"
+    local_image_files = sorted(list((local_data_dir / local_img_dir).glob("*.[jp][pn][g]")))
+    local_mask_files  = sorted(list((local_data_dir / local_mask_dir).glob("*.[jp][pn][g]")))
+
+    # Sanity checks
+    if not idrid_val_imgs.exists():
+        raise RuntimeError(
+            f"IDRID val split not found: {idrid_val_imgs}\n"
+            f"Run first: python segmentation/scripts/prepare_val_split.py"
+        )
+
+    print(f"[*] IDRID train dir : {idrid_train_imgs}")
+    print(f"[*] IDRID val   dir : {idrid_val_imgs}")
+    print(f"[*] Local data      : {len(local_image_files)} images (used for generalization test only)")
 
     config = _PilotConfig()
 
@@ -196,21 +203,23 @@ def main(quick_test: bool = False):
     print(f"\n[*] Strategy: {strategy.num_replicas_in_sync} replicas in sync.")
     global_batch_size = BATCH_SIZE * strategy.num_replicas_in_sync
 
-    # Train on IDRID
+    # Train generator: IDRID training split (43 images, 5 classes, augmented)
     train_gen = IDRIDPatchDataGenerator(
         idrid_train_imgs, idrid_train_masks, config,
         patches_per_image=patches_tr,
         batch_size=global_batch_size,
         augmentations=train_augs,
     )
-    val_gen = PatchDataGenerator(
-        val_imgs, val_masks, config,
+    # Val generator: IDRID val split (11 images, same 5 classes, no augmentation)
+    # This ensures EarlyStopping monitors a loss from the SAME class distribution as training.
+    val_gen = IDRIDPatchDataGenerator(
+        idrid_val_imgs, idrid_val_masks, config,
         patches_per_image=patches_val,
         batch_size=global_batch_size,
-        augmentitons=None,
+        augmentations=None,
     )
 
-    print(f"[*] Train batches: {len(train_gen)},  Val batches: {len(val_gen)}")
+    print(f"[*] Train batches: {len(train_gen)},  Val batches (IDRID split): {len(val_gen)}")
 
     # ---- Data Sanity Check (Professional Verification) ----
     print("\n" + "-" * 40)
@@ -461,10 +470,9 @@ def main(quick_test: bool = False):
             model_path = weights_path  # fallback for metrics reporting
 
     # -----------------------------------------------------------------------
-    # VALIDATION (Local Data) - Already done during training, but let's summarize
+    # EVALUATION 1: IDRID Val Split (same data used for EarlyStopping monitoring)
     # -----------------------------------------------------------------------
-    print("\n[*] Evaluating on Validation Set (Local Data) …")
-    # ... (existing val logic) ...
+    print("\n[*] Evaluating on IDRID Validation Split (11 images, full 5 classes) …")
     y_true_list, y_pred_list = [], []
     for batch_x, batch_y in val_gen:
         y_true_list.append(batch_y)
@@ -477,6 +485,30 @@ def main(quick_test: bool = False):
 
     val_iou  = compute_iou(y_true_val, y_pred_val, NUM_CLASSES)
     val_dice = compute_dice(y_true_val, y_pred_val, NUM_CLASSES)
+
+    # -----------------------------------------------------------------------
+    # EVALUATION 2: Local Data Generalization Test (3 classes: MA, HE, EX)
+    # Note: SE and OD will be NaN here as local data has no such annotations.
+    # -----------------------------------------------------------------------
+    local_iou, local_dice = {}, {}
+    if local_image_files:
+        print("\n[*] Evaluating generalization on Local Data (3-class vessel labels) …")
+        local_gen = PatchDataGenerator(
+            local_image_files, local_mask_files, config,
+            patches_per_image=patches_val,
+            batch_size=global_batch_size,
+            augmentitons=None,
+        )
+        ly_true_list, ly_pred_list = [], []
+        for batch_x, batch_y in local_gen:
+            ly_true_list.append(batch_y)
+            preds = model.predict(batch_x, verbose=0)
+            if isinstance(preds, list): preds = preds[0]
+            ly_pred_list.append(preds)
+        ly_true = np.concatenate(ly_true_list)
+        ly_pred = np.concatenate(ly_pred_list)
+        local_iou  = compute_iou(ly_true, ly_pred, NUM_CLASSES)
+        local_dice = compute_dice(ly_true, ly_pred, NUM_CLASSES)
     
     # -----------------------------------------------------------------------
     # TESTING (IDRID Data) - New Phase
@@ -523,6 +555,17 @@ def main(quick_test: bool = False):
         test_dice = compute_dice(y_true_test, y_pred_test, NUM_CLASSES)
 
     # ---- Summary ----
+    def _safe_round(d: dict) -> dict:
+        """Round floats; keep NaN as None for JSON serialization."""
+        out = {}
+        for k, v in d.items():
+            try:
+                import math
+                out[k] = None if math.isnan(float(v)) else round(float(v), 4)
+            except Exception:
+                out[k] = v
+        return out
+
     metrics = {
         "seed": SEED,
         "config": {
@@ -544,13 +587,20 @@ def main(quick_test: bool = False):
             "model_size_mb": round(model_size_mb, 3),
             "model_path": str(model_path),
         },
-        "validation_local": {
-            "iou": {k: round(float(v), 4) for k, v in val_iou.items()},
-            "dice": {k: round(float(v), 4) for k, v in val_dice.items()},
+        "validation_idrid_split": {  # IDRID val split — same 5 classes as training
+            "note": "IDRiD_44-54 (11 images, all 5 classes)",
+            "iou": _safe_round(val_iou),
+            "dice": _safe_round(val_dice),
         },
-         "test_idrid": {
-            "iou": {k: round(float(v), 4) for k, v in test_iou.items()},
-            "dice": {k: round(float(v), 4) for k, v in test_dice.items()},
+        "generalization_local": {   # Local data — only MA/HE/EX (SE & OD are NaN)
+            "note": "Local vessel labels (3 classes). SE & OD are NaN (no GT).",
+            "iou": _safe_round(local_iou) if local_iou else {},
+            "dice": _safe_round(local_dice) if local_dice else {},
+        },
+        "test_idrid": {
+            "note": "Official IDRID test set (IDRiD_55-81, all 5 classes)",
+            "iou": _safe_round(test_iou),
+            "dice": _safe_round(test_dice),
         },
     }
 
@@ -559,28 +609,44 @@ def main(quick_test: bool = False):
         json.dump(metrics, f, indent=2)
 
     class_names = list(CLASS_NAMES)
-    
-    print("\n" + "=" * 60)
-    print("  PILOT TEST — RESULTS (Validation: Local)")
-    print("=" * 60)
-    for i, name in enumerate(class_names):
-        # Validation might have NaNs for missing classes (SE, OD)
-        iou  = val_iou.get(f"iou_class_{i}", float("nan"))
-        dice = val_dice.get(f"dice_class_{i}", float("nan"))
-        print(f"  {name:15s}  |  IoU: {iou:.4f}  |  Dice: {dice:.4f}")
-    print(f"\n  Mean IoU  : {val_iou['mean_iou']:.4f}")
-    print(f"  Mean Dice : {val_dice['mean_dice']:.4f}")
-    
-    if idrid_test_imgs.exists():
+
+    def _print_results(title: str, iou_d: dict, dice_d: dict, note: str = ""):
+        import math
         print("\n" + "=" * 60)
-        print("  PILOT TEST — RESULTS (Testing: IDRID)")
+        print(f"  {title}")
+        if note:
+            print(f"  [{note}]")
         print("=" * 60)
         for i, name in enumerate(class_names):
-            iou  = test_iou.get(f"iou_class_{i}", float("nan"))
-            dice = test_dice.get(f"dice_class_{i}", float("nan"))
-            print(f"  {name:15s}  |  IoU: {iou:.4f}  |  Dice: {dice:.4f}")
-        print(f"\n  Mean IoU  : {test_iou['mean_iou']:.4f}")
-        print(f"  Mean Dice : {test_dice['mean_dice']:.4f}")
+            iou  = iou_d.get(f"iou_class_{i}",  float("nan"))
+            dice = dice_d.get(f"dice_class_{i}", float("nan"))
+            iou_str  = f"{iou:.4f}"  if not (isinstance(iou,  float) and math.isnan(iou))  else "  nan "
+            dice_str = f"{dice:.4f}" if not (isinstance(dice, float) and math.isnan(dice)) else "  nan "
+            print(f"  {name:15s}  |  IoU: {iou_str}  |  Dice: {dice_str}")
+        mean_iou  = iou_d.get('mean_iou',   float('nan'))
+        mean_dice = dice_d.get('mean_dice',  float('nan'))
+        print(f"\n  Mean IoU  : {mean_iou:.4f}")
+        print(f"  Mean Dice : {mean_dice:.4f}")
+
+    _print_results(
+        "RESULTS — IDRID Val Split (5 classes, monitoring set)",
+        val_iou, val_dice,
+        note="IDRiD_44 – IDRiD_54"
+    )
+
+    if local_iou:
+        _print_results(
+            "RESULTS — Local Data Generalization (3 classes: MA/HE/EX)",
+            local_iou, local_dice,
+            note="SE & OD are NaN — no GT annotations in local data"
+        )
+
+    if idrid_test_imgs.exists():
+        _print_results(
+            "RESULTS — IDRID Official Test Set (5 classes)",
+            test_iou, test_dice,
+            note="IDRiD_55 – IDRiD_81"
+        )
 
     print("=" * 60)
     print(f"\n  Metrics   → {metrics_path}")

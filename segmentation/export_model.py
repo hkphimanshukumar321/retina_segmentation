@@ -168,7 +168,12 @@ def export_onnx(
         model = SEGMENTATION_MODELS[cfg.model.name](
             input_shape=(*input_shape, 3),
             num_classes=cfg.model.num_classes,
-            deep_supervision=False,
+            encoder_filters=cfg.model.encoder_filters,
+            dropout_rate=cfg.model.dropout_rate,
+            ghost_ratio=cfg.model.ghost_ratio,
+            use_skip_attention=cfg.model.use_skip_attention,
+            use_aspp=cfg.model.use_aspp,
+            deep_supervision=False,  # ONNX needs single output
         )
         model.load_weights(weights_path)
     else:

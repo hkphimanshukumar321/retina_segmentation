@@ -46,9 +46,9 @@ class TrainingConfig:
     """Training hyperparameters."""
     epochs: int = 50
     learning_rate: float = 1e-3
-    batch_size: int = 8
+    batch_size: int = 64
     patches_per_image: int = 100
-    patches_per_image_val: int = 20
+    patches_per_image_val: int = 30   # IDRID val split: 11 imgs × 30 = 330 samples
     clip_norm: float = 1.0
 
 

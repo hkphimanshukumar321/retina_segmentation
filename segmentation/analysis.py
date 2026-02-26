@@ -79,20 +79,25 @@ def _parse_test_metrics(path: Path) -> Dict:
     with open(path) as f:
         data = json.load(f)
 
+    # JSON null becomes Python None; convert to nan for pandas compatibility
+    def _or_nan(v):
+        return float("nan") if v is None else float(v)
+
     row = {"Model": data.get("model", path.stem)}
 
-    iou = data.get("iou", {})
-    dice = data.get("dice", {})
+    iou      = data.get("iou", {})
+    dice     = data.get("dice", {})
     clinical = data.get("clinical", {})
 
-    row["Mean_IoU"] = iou.get("mean_iou", float("nan"))
-    row["Mean_Dice"] = dice.get("mean_dice", float("nan"))
+    row["Mean_IoU"]  = _or_nan(iou.get("mean_iou"))
+    row["Mean_Dice"] = _or_nan(dice.get("mean_dice"))
 
     for i, name in enumerate(CLASS_NAMES):
-        row[f"IoU_{name}"] = iou.get(f"iou_class_{i}", float("nan"))
-        row[f"Dice_{name}"] = dice.get(f"dice_class_{i}", float("nan"))
-        row[f"Sens_{name}"] = clinical.get(f"sensitivity_class_{i}", float("nan"))
-        row[f"Prec_{name}"] = clinical.get(f"precision_class_{i}", float("nan"))
+        row[f"IoU_{name}"]  = _or_nan(iou.get(f"iou_class_{i}"))
+        row[f"Dice_{name}"] = _or_nan(dice.get(f"dice_class_{i}"))
+        # FIX: keys are sens_class_N / prec_class_N (not sensitivity_ / precision_)
+        row[f"Sens_{name}"] = _or_nan(clinical.get(f"sens_class_{i}"))
+        row[f"Prec_{name}"] = _or_nan(clinical.get(f"prec_class_{i}"))
 
     # Try to get param count
     row["Params"] = data.get("params", "—")
@@ -174,8 +179,9 @@ def run_significance_tests(results_dir: Path) -> pd.DataFrame:
                 bl_data = json.load(f)
 
             bl_name = bl_data.get("model", sub.name)
-            bl_iou = [bl_data["iou"].get(f"iou_class_{i}", float("nan"))
-                      for i in range(len(CLASS_NAMES))]
+            # JSON null → None → treat as nan
+            bl_iou = [float(v) if v is not None else float("nan")
+                      for v in (bl_data["iou"].get(f"iou_class_{i}") for i in range(len(CLASS_NAMES)))]
 
             # Wilcoxon signed-rank test (paired, two-sided)
             # Filter out NaN pairs
