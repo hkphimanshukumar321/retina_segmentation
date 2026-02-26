@@ -31,7 +31,7 @@ def _norm_layer(norm_type: str = 'group', groups: int = 8):
     """
     if norm_type == 'group':
         def _make(name=None):
-            return layers.GroupNormalization(groups=groups, name=name)
+            return layers.GroupNormalization(groups=groups, axis=-1, name=name)
         return _make
     else:
         def _make(name=None):
@@ -65,7 +65,7 @@ class GhostModule(layers.Layer):
         )
         # GroupNorm: stable for small batches (Wu & He, ECCV 2018)
         self.primary_gn = layers.GroupNormalization(
-            groups=min(8, self.primary_filters)
+            groups=min(8, self.primary_filters), axis=-1
         )
         self.primary_act = layers.Activation(activation)
 
@@ -74,7 +74,7 @@ class GhostModule(layers.Layer):
             dw_kernel, padding='same', use_bias=False
         )
         self.ghost_gn = layers.GroupNormalization(
-            groups=min(8, self.primary_filters)
+            groups=min(8, self.primary_filters), axis=-1
         )
         self.ghost_act = layers.Activation(activation)
 
@@ -122,7 +122,7 @@ class CoordinateAttention(layers.Layer):
         mid_channels = max(8, channels // self.reduction)
 
         self.shared_conv = layers.Conv2D(mid_channels, 1, use_bias=False)
-        self.shared_gn = layers.GroupNormalization(groups=min(8, mid_channels))
+        self.shared_gn = layers.GroupNormalization(groups=min(8, mid_channels), axis=-1)
         self.shared_act = layers.Activation('relu')
 
         self.conv_h = layers.Conv2D(channels, 1, use_bias=False)

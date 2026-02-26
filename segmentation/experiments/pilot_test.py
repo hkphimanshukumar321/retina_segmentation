@@ -55,6 +55,7 @@ from common.data_loader import (
     RandomContrast, RandomElasticDeform,
     decode_labelmap
 )
+from common.hardware import setup_gpu_memory_growth, get_gpu_info
 from segmentation.src.idrid_loader import IDRIDPatchDataGenerator
 from segmentation.src.metrics import DiceScore, IoUScore
 from segmentation.src.models import SEGMENTATION_MODELS
@@ -124,6 +125,13 @@ def main(quick_test: bool = False):
 
     # ---- Seed everything ----
     set_seed(SEED)
+
+    # ---- Hardware configuration ----
+    setup_gpu_memory_growth()
+    gpu_info = get_gpu_info()
+    print(f"\n[*] Hardware Detection:")
+    print(f"    - GPUs Found: {gpu_info['num_gpus']}")
+    print(f"    - Names: {', '.join(gpu_info['gpu_names'])}")
 
     # ---- Logging ----
     setup_logging(log_dir=SEG_DIR / "logs")
@@ -384,6 +392,7 @@ def main(quick_test: bool = False):
                 },
             )
         )
+        ds_train = ds_train.prefetch(tf.data.AUTOTUNE)
         ds_train = ds_train.repeat()  # Fix: allow infinite epochs
 
         ds_val = tf.data.Dataset.from_generator(
@@ -397,6 +406,7 @@ def main(quick_test: bool = False):
                 },
             )
         )
+        ds_val = ds_val.prefetch(tf.data.AUTOTUNE)
         ds_val = ds_val.repeat()  # Fix: allow infinite epochs
         train_data = ds_train
         val_data = ds_val
@@ -410,15 +420,20 @@ def main(quick_test: bool = False):
 
     # ---- Training ----
     t0 = time.time()
-    # verbose=0 to hide default messy bars, let SimpleLogger print clean stats
+    
+    # We remove SimpleLogger from callbacks and use verbose=1 
+    # to render the default ETA + Batch progress bar accurately over TQDM outputs on CLI
+    # Reinitialize standard logs while keeping CSV backup
+    active_callbacks = [c for c in callbacks if not isinstance(c, SimpleLogger)]
+    
     history = model.fit(
         train_data,
         validation_data=val_data,
         epochs=epochs,
         steps_per_epoch=steps_per_epoch,
         validation_steps=validation_steps,
-        callbacks=callbacks,
-        verbose=0, 
+        callbacks=active_callbacks,
+        verbose=1, # Enabled standard keras progress bar (fix #4)
     )
     train_time = time.time() - t0
 
