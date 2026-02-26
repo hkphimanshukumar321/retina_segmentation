@@ -114,10 +114,10 @@ def combined_loss(alpha=0.3, beta=0.7, gamma=0.75):
     Retained for backward compatibility.
     """
     ft_loss = focal_tversky_loss(alpha, beta, gamma)
-    bce = tf.keras.losses.BinaryCrossentropy()
     
     def loss(y_true, y_pred):
-        return bce(y_true, y_pred) + ft_loss(y_true, y_pred)
+        bce_loss = tf.reduce_mean(tf.keras.losses.binary_crossentropy(y_true, y_pred))
+        return bce_loss + ft_loss(y_true, y_pred)
         
     return loss
 
@@ -143,13 +143,13 @@ def combined_loss_v2(
     """
     lov = lovasz_softmax_loss()
     ft = focal_tversky_loss(ft_alpha, ft_beta, ft_gamma)
-    bce = tf.keras.losses.BinaryCrossentropy()
     
     def loss(y_true, y_pred):
+        bce_loss = tf.reduce_mean(tf.keras.losses.binary_crossentropy(y_true, y_pred))
         return (
             w_lovasz * lov(y_true, y_pred)
             + w_focal_tversky * ft(y_true, y_pred)
-            + w_bce * bce(y_true, y_pred)
+            + w_bce * bce_loss
         )
     
     return loss

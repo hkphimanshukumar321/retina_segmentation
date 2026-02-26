@@ -1,0 +1,421 @@
+﻿
+============================================================
+  SEGMENTATION ù MAIN MODEL
+============================================================
+python : [02:51:09] [INFO] [segmentation_runner] 
+Random seeds set to 42
+At line:1 char:66
++ ... WRITEBYTECODE='1'; python -u 
+segmentation/run.py --quick 2>&1 | Out-F ...
++                        
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([02: 
+   51:09] [INF...seeds set to 42:String) [], Rem  
+  oteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[02:51:09] [INFO] [segmentation_runner] Hardware: 
+{'num_gpus': 0, 'gpu_names': [], 'has_gpu': False}
+  Model      : ghost_cas_unet_v2
+  Resolution : (64, 64)
+  Filters    : [32, 64, 128, 256]
+  Epochs     : 1
+============================================================
+
+[02:51:09] [INFO] [segmentation_runner] IDRID 
+detected \u2192 all 54 local images used for 
+validation
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\hkphi\AppData\Local\Programs\Pyth
+on\Python310\lib\logging\__init__.py", line 1103, 
+in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\hkphi\AppData\Local\Programs\Pyth
+on\Python310\lib\encodings\cp1252.py", line 19, 
+in encode
+    return codecs.charmap_encode(input,self.errors
+,encoding_table)[0]
+UnicodeEncodeError: 'charmap' codec can't encode 
+character '\u2192' in position 55: character maps 
+to <undefined>
+Call stack:
+  File "C:\Users\hkphi\OneDrive\Desktop\WORK\retin
+a_scan\segmentation\run.py", line 796, in <module>
+    success = run_main(quick_test=args.quick)
+  File "C:\Users\hkphi\OneDrive\Desktop\WORK\retin
+a_scan\segmentation\run.py", line 521, in run_main
+    data = _resolve_data(config)
+  File "C:\Users\hkphi\OneDrive\Desktop\WORK\retin
+a_scan\segmentation\run.py", line 122, in 
+_resolve_data
+    logger.info(f"IDRID detected \u2192 all 
+{len(val_imgs)} local images used for validation")
+Message: 'IDRID detected \u2192 all 54 local 
+images used for validation'
+Arguments: ()
+[02:51:09] [INFO] [common.data_loader] 
+Augmentation pipeline: 5 transforms
+[02:51:09] [INFO] [segmentation_runner] Using 
+IDRID dataset for training.
+[02:51:09] [INFO] [src.idrid_loader] Pre-loading 
+54 IDRID samples into RAM...
+[02:51:22] [INFO] [src.idrid_loader] IDRID Cache 
+complete.
+[*] Train batches: 13,  Val batches: 13
+WARNING:tensorflow:From C:\Users\hkphi\AppData\Loc
+al\Programs\Python\Python310\lib\site-packages\ker
+as\src\backend\tensorflow\core.py:232: The name 
+tf.placeholder is deprecated. Please use 
+tf.compat.v1.placeholder instead.
+
+[02:51:22] [WARNING] [tensorflow] From C:\Users\hk
+phi\AppData\Local\Programs\Python\Python310\lib\si
+te-packages\keras\src\backend\tensorflow\core.py:2
+32: The name tf.placeholder is deprecated. Please 
+use tf.compat.v1.placeholder instead.
+
+[02:51:24] [INFO] [segmentation_runner] Model: 
+"Ghost_CAS_UNet_v2_DS"
++-------------------------------------------------
+-------------------------+
+| Layer (type)        | Output Shape      |    
+Param # | Connected to      |
+|---------------------+-------------------+-------
+-----+-------------------|
+| input_layer         | (None, 64, 64, 3) |       
+   0 | -                 |
+| (InputLayer)        |                   |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| ghost_bottleneck    | (None, 64, 64,    |      
+5,168 | input_layer[0][0] |
+| (GhostBottleneck)   | 32)               |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| max_pooling2d       | (None, 32, 32,    |       
+   0 | ghost_bottleneckà |
+| (MaxPooling2D)      | 32)               |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| dropout (Dropout)   | (None, 32, 32,    |       
+   0 | max_pooling2d[0]à |
+|                     | 32)               |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| ghost_bottleneck_1  | (None, 32, 32,    |     
+22,336 | dropout[0][0]     |
+| (GhostBottleneck)   | 64)               |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| max_pooling2d_1     | (None, 16, 16,    |       
+   0 | ghost_bottleneckà |
+| (MaxPooling2D)      | 64)               |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| dropout_1 (Dropout) | (None, 16, 16,    |       
+   0 | max_pooling2d_1[à |
+|                     | 64)               |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| ghost_bottleneck_2  | (None, 16, 16,    |     
+87,680 | dropout_1[0][0]   |
+| (GhostBottleneck)   | 128)              |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| max_pooling2d_2     | (None, 8, 8, 128) |       
+   0 | ghost_bottleneckà |
+| (MaxPooling2D)      |                   |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| dropout_2 (Dropout) | (None, 8, 8, 128) |       
+   0 | max_pooling2d_2[à |
+|---------------------+-------------------+-------
+-----+-------------------|
+| ghost_bottleneck_3  | (None, 8, 8, 256) |    
+347,392 | dropout_2[0][0]   |
+| (GhostBottleneck)   |                   |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| dw_aspp (DW_ASPP)   | (None, 8, 8, 512) |    
+256,000 | ghost_bottleneckà |
+|---------------------+-------------------+-------
+-----+-------------------|
+| coordinate_attentià | (None, 8, 8, 512) |    
+196,864 | dw_aspp[0][0]     |
+| (CoordinateAttentià |                   |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| attention_gate      | (None, 8, 8, 256) |    
+197,377 | ghost_bottleneckà |
+| (AttentionGate)     |                   |       
+     | coordinate_attenà |
+|---------------------+-------------------+-------
+-----+-------------------|
+| concatenate         | (None, 8, 8, 768) |       
+   0 | coordinate_attenà |
+| (Concatenate)       |                   |       
+     | attention_gate[0à |
+|---------------------+-------------------+-------
+-----+-------------------|
+| ghost_bottleneck_4  | (None, 8, 8, 256) |    
+593,152 | concatenate[0][0] |
+| (GhostBottleneck)   |                   |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| up_sampling2d       | (None, 16, 16,    |       
+   0 | ghost_bottleneckà |
+| (UpSampling2D)      | 256)              |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| ghost_module_10     | (None, 16, 16,    |     
+17,216 | up_sampling2d[0]à |
+| (GhostModule)       | 128)              |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| attention_gate_1    | (None, 16, 16,    |     
+33,153 | ghost_bottleneckà |
+| (AttentionGate)     | 128)              |       
+     | ghost_module_10[à |
+|---------------------+-------------------+-------
+-----+-------------------|
+| concatenate_1       | (None, 16, 16,    |       
+   0 | ghost_module_10[à |
+| (Concatenate)       | 256)              |       
+     | attention_gate_1à |
+|---------------------+-------------------+-------
+-----+-------------------|
+| ghost_bottleneck_5  | (None, 16, 16,    |    
+124,544 | concatenate_1[0]à |
+| (GhostBottleneck)   | 128)              |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| up_sampling2d_1     | (None, 32, 32,    |       
+   0 | ghost_bottleneckà |
+| (UpSampling2D)      | 128)              |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| ghost_module_13     | (None, 32, 32,    |      
+4,512 | up_sampling2d_1[à |
+| (GhostModule)       | 64)               |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| attention_gate_2    | (None, 32, 32,    |      
+8,385 | ghost_bottleneckà |
+| (AttentionGate)     | 64)               |       
+     | ghost_module_13[à |
+|---------------------+-------------------+-------
+-----+-------------------|
+| concatenate_2       | (None, 32, 32,    |       
+   0 | ghost_module_13[à |
+| (Concatenate)       | 128)              |       
+     | attention_gate_2à |
+|---------------------+-------------------+-------
+-----+-------------------|
+| ghost_bottleneck_6  | (None, 32, 32,    |     
+31,552 | concatenate_2[0]à |
+| (GhostBottleneck)   | 64)               |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| up_sampling2d_2     | (None, 64, 64,    |       
+   0 | ghost_bottleneckà |
+| (UpSampling2D)      | 64)               |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| ghost_module_16     | (None, 64, 64,    |      
+1,232 | up_sampling2d_2[à |
+| (GhostModule)       | 32)               |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| attention_gate_3    | (None, 64, 64,    |      
+2,145 | ghost_bottleneckà |
+| (AttentionGate)     | 32)               |       
+     | ghost_module_16[à |
+|---------------------+-------------------+-------
+-----+-------------------|
+| concatenate_3       | (None, 64, 64,    |       
+   0 | ghost_module_16[à |
+| (Concatenate)       | 64)               |       
+     | attention_gate_3à |
+|---------------------+-------------------+-------
+-----+-------------------|
+| ghost_bottleneck_7  | (None, 64, 64,    |      
+8,096 | concatenate_3[0]à |
+| (GhostBottleneck)   | 32)               |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| aux_out_1 (Conv2D)  | (None, 16, 16, 5) |       
+ 645 | ghost_bottleneckà |
+|---------------------+-------------------+-------
+-----+-------------------|
+| aux_out_2 (Conv2D)  | (None, 32, 32, 5) |       
+ 325 | ghost_bottleneckà |
+|---------------------+-------------------+-------
+-----+-------------------|
+| main_out (Conv2D)   | (None, 64, 64, 5) |       
+ 165 | ghost_bottleneckà |
+|---------------------+-------------------+-------
+-----+-------------------|
+| aux_up_1            | (None, 64, 64, 5) |       
+   0 | aux_out_1[0][0]   |
+| (UpSampling2D)      |                   |       
+     |                   |
+|---------------------+-------------------+-------
+-----+-------------------|
+| aux_up_2            | (None, 64, 64, 5) |       
+   0 | aux_out_2[0][0]   |
+| (UpSampling2D)      |                   |       
+     |                   |
++-------------------------------------------------
+-------------------------+
+ Total params: 1,937,939 (7.39 MB)
+ Trainable params: 1,936,275 (7.39 MB)
+ Non-trainable params: 1,664 (6.50 KB)
+
+C:\Users\hkphi\AppData\Local\Programs\Python\Pytho
+n310\lib\site-packages\keras\src\trainers\data_ada
+pters\py_dataset_adapter.py:121: UserWarning: 
+Your `PyDataset` class should call 
+`super().__init__(**kwargs)` in its constructor. 
+`**kwargs` can include `workers`, 
+`use_multiprocessing`, `max_queue_size`. Do not 
+pass these arguments to `fit()`, as they will be 
+ignored.
+  self._warn_if_super_not_called()
+
+[1m 1/13[0m [32m=[0m[37m===================[0m [1m4:11[0m 21s/step - aux_up_1_loss: 0.9387 - aux_up_2_loss: 0.8287 - loss: 1.4610 - main_out_accuracy: 0.1638 - main_out_dice_score: 0.0225 - main_out_iou_score: 0.0145 - main_out_loss: 0.9198
+[1m 2/13[0m [32m===[0m[37m=================[0m [1m4s[0m 431ms/step - aux_up_1_loss: 0.9017 - aux_up_2_loss: 0.8358 - loss: 1.4347 - main_out_accuracy: 0.1743 - main_out_dice_score: 0.0250 - main_out_iou_score: 0.0170 - main_out_loss: 0.9068
+[1m 3/13[0m [32m====[0m[37m================[0m [1m6s[0m 657ms/step - aux_up_1_loss: 0.8553 - aux_up_2_loss: 0.8341 - loss: 1.4015 - main_out_accuracy: 0.1800 - main_out_dice_score: 0.0282 - main_out_iou_score: 0.0192 - main_out_loss: 0.8925
+[1m 4/13[0m [32m======[0m[37m==============[0m [1m7s[0m 873ms/step - aux_up_1_loss: 0.8182 - aux_up_2_loss: 0.8286 - loss: 1.3717 - main_out_accuracy: 0.1838 - main_out_dice_score: 0.0302 - main_out_iou_score: 0.0204 - main_out_loss: 0.8787
+[1m 5/13[0m [32m=======[0m[37m=============[0m [1m6s[0m 829ms/step - aux_up_1_loss: 0.7999 - aux_up_2_loss: 0.8229 - loss: 1.3501 - main_out_accuracy: 0.1860 - main_out_dice_score: 0.0313 - main_out_iou_score: 0.0209 - main_out_loss: 0.8655
+[1m 6/13[0m [32m=========[0m[37m===========[0m [1m6s[0m 965ms/step - aux_up_1_loss: 0.7854 - aux_up_2_loss: 0.8175 - loss: 1.3309 - main_out_accuracy: 0.1904 - main_out_dice_score: 0.0323 - main_out_iou_score: 0.0215 - main_out_loss: 0.8533
+[1m 7/13[0m [32m==========[0m[37m==========[0m [1m5s[0m 919ms/step - aux_up_1_loss: 0.7756 - aux_up_2_loss: 0.8130 - loss: 1.3161 - main_out_accuracy: 0.1947 - main_out_dice_score: 0.0333 - main_out_iou_score: 0.0222 - main_out_loss: 0.8432
+[1m 8/13[0m [32m============[0m[37m========[0m [1m4s[0m 860ms/step - aux_up_1_loss: 0.7646 - aux_up_2_loss: 0.8088 - loss: 1.3027 - main_out_accuracy: 0.1977 - main_out_dice_score: 0.0352 - main_out_iou_score: 0.0240 - main_out_loss: 0.8351
+[1m 9/13[0m [32m=============[0m[37m=======[0m [1m3s[0m 919ms/step - aux_up_1_loss: 0.7538 - aux_up_2_loss: 0.8044 - loss: 1.2897 - main_out_accuracy: 0.2022 - main_out_dice_score: 0.0387 - main_out_iou_score: 0.0274 - main_out_loss: 0.8273
+[1m10/13[0m [32m===============[0m[37m=====[0m [1m2s[0m 939ms/step - aux_up_1_loss: 0.7441 - aux_up_2_loss: 0.7998 - loss: 1.2779 - main_out_accuracy: 0.2069 - main_out_dice_score: 0.0429 - main_out_iou_score: 0.0314 - main_out_loss: 0.8203
+[1m11/13[0m [32m================[0m[37m====[0m [1m1s[0m 936ms/step - aux_up_1_loss: 0.7340 - aux_up_2_loss: 0.7951 - loss: 1.2660 - main_out_accuracy: 0.2122 - main_out_dice_score: 0.0481 - main_out_iou_score: 0.0365 - main_out_loss: 0.8134
+[1m12/13[0m [32m==================[0m[37m==[0m [1m0s[0m 966ms/step - aux_up_1_loss: 0.7235 - aux_up_2_loss: 0.7906 - loss: 1.2544 - main_out_accuracy: 0.2186 - main_out_dice_score: 0.0544 - main_out_iou_score: 0.0427 - main_out_loss: 0.8069
+[1m13/13[0m [32m====================[0m[37m[0m [1m0s[0m 978ms/step - aux_up_1_loss: 0.7143 - aux_up_2_loss: 0.7860 - loss: 1.2439 - main_out_accuracy: 0.2245 - main_out_dice_score: 0.0614 - main_out_iou_score: 0.0496 - main_out_loss: 0.8009
+Epoch 1: val_loss improved from None to 1.21530, saving model to C:\Users\hkphi\OneDrive\Desktop\WORK\retina_scan\segmentation\results\main_best.weights.h5
+
+[1m13/13[0m [32m====================[0m[37m[0m [1m38s[0m 1s/step - aux_up_1_loss: 0.6040 - aux_up_2_loss: 0.7312 - loss: 1.1172 - main_out_accuracy: 0.2948 - main_out_dice_score: 0.1445 - main_out_iou_score: 0.1315 - main_out_loss: 0.7294 - val_aux_up_1_loss: 0.8359 - val_aux_up_2_loss: 0.6662 - val_loss: 1.2153 - val_main_out_accuracy: 0.0017 - val_main_out_dice_score: 0.2886 - val_main_out_iou_score: 0.2885 - val_main_out_loss: 0.7477 - learning_rate: 0.0010
+Restoring model weights from the end of the best epoch: 1.
+[02:52:05] [INFO] [segmentation_runner] Training 
+complete in 0.7 min.
+[02:52:05] [INFO] [src.idrid_loader] Pre-loading 
+27 IDRID samples into RAM...
+[02:52:13] [INFO] [src.idrid_loader] IDRID Cache 
+complete.
+
+============================================================
+  TEST PHASE ù Ghost_CAS_UNet_v2 on IDRID Test Set
+============================================================
+[*] Test batches: 16
+[02:52:29] [INFO] [segmentation_runner] Confusion 
+matrix saved \u2192 
+Ghost_CAS_UNet_v2_confusion_matrix.png
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\hkphi\AppData\Local\Programs\Pyth
+on\Python310\lib\logging\__init__.py", line 1103, 
+in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\hkphi\AppData\Local\Programs\Pyth
+on\Python310\lib\encodings\cp1252.py", line 19, 
+in encode
+    return codecs.charmap_encode(input,self.errors
+,encoding_table)[0]
+UnicodeEncodeError: 'charmap' codec can't encode 
+character '\u2192' in position 63: character maps 
+to <undefined>
+Call stack:
+  File "C:\Users\hkphi\OneDrive\Desktop\WORK\retin
+a_scan\segmentation\run.py", line 796, in <module>
+    success = run_main(quick_test=args.quick)
+  File "C:\Users\hkphi\OneDrive\Desktop\WORK\retin
+a_scan\segmentation\run.py", line 557, in run_main
+    _evaluate_test(model, config, results_dir, 
+"Ghost_CAS_UNet_v2", quick_test)
+  File "C:\Users\hkphi\OneDrive\Desktop\WORK\retin
+a_scan\segmentation\run.py", line 374, in 
+_evaluate_test
+    _save_confusion_matrix(y_true, y_pred, 
+num_classes, results_dir, model_name)
+  File "C:\Users\hkphi\OneDrive\Desktop\WORK\retin
+a_scan\segmentation\run.py", line 439, in 
+_save_confusion_matrix
+    logger.info(f"Confusion matrix saved \u2192 
+{model_name}_confusion_matrix.png")
+Message: 'Confusion matrix saved \u2192 
+Ghost_CAS_UNet_v2_confusion_matrix.png'
+Arguments: ()
+[02:52:31] [INFO] [segmentation_runner] 
+Predictions saved \u2192 
+Ghost_CAS_UNet_v2_predictions.png
+--- Logging error ---
+Traceback (most recent call last):
+  File "C:\Users\hkphi\AppData\Local\Programs\Pyth
+on\Python310\lib\logging\__init__.py", line 1103, 
+in emit
+    stream.write(msg + self.terminator)
+  File "C:\Users\hkphi\AppData\Local\Programs\Pyth
+on\Python310\lib\encodings\cp1252.py", line 19, 
+in encode
+    return codecs.charmap_encode(input,self.errors
+,encoding_table)[0]
+UnicodeEncodeError: 'charmap' codec can't encode 
+character '\u2192' in position 58: character maps 
+to <undefined>
+Call stack:
+  File "C:\Users\hkphi\OneDrive\Desktop\WORK\retin
+a_scan\segmentation\run.py", line 796, in <module>
+    success = run_main(quick_test=args.quick)
+  File "C:\Users\hkphi\OneDrive\Desktop\WORK\retin
+a_scan\segmentation\run.py", line 557, in run_main
+    _evaluate_test(model, config, results_dir, 
+"Ghost_CAS_UNet_v2", quick_test)
+  File "C:\Users\hkphi\OneDrive\Desktop\WORK\retin
+a_scan\segmentation\run.py", line 377, in 
+_evaluate_test
+    _save_prediction_samples(test_gen, model, 
+results_dir, model_name, num_samples=4)
+  File "C:\Users\hkphi\OneDrive\Desktop\WORK\retin
+a_scan\segmentation\run.py", line 489, in 
+_save_prediction_samples
+    logger.info(f"Predictions saved \u2192 
+{model_name}_predictions.png")
+Message: 'Predictions saved \u2192 
+Ghost_CAS_UNet_v2_predictions.png'
+Arguments: ()
+
+  Class            |       IoU  |      Dice  |      Sens  |      Prec
+  ------------------------------------------------------------
+  MA               |    0.0000  |    0.0000  |       nan  |       nan
+  HE               |    0.0005  |    0.0010  |       nan  |       nan
+  EX               |    0.0000  |    0.0000  |       nan  |       nan
+  SE               |    0.0018  |    0.0036  |       nan  |       nan
+  OD               |    0.1874  |    0.3157  |       nan  |       nan
+
+  Mean IoU  : 0.0380
+  Mean Dice : 0.0641
