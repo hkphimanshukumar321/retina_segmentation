@@ -101,10 +101,11 @@ class IDRIDPatchDataGenerator(PatchDataGenerator):
         logger.info(f"  Ben Graham: {self._use_ben_graham}, CLAHE: {self._use_clahe}, "
                     f"prob_lesion: {self._prob_lesion}, prob_ma_target: {self._prob_ma_target}")
 
-        # Import here to keep top-level import clean (optional dependency)
-        from segmentation.src.retinal_preprocessing import (
-            retinal_preprocess, compute_fov_mask
-        )
+        # Import with fallback for both package and direct script usage
+        try:
+            from segmentation.src.retinal_preprocessing import retinal_preprocess, compute_fov_mask
+        except ImportError:
+            from src.retinal_preprocessing import retinal_preprocess, compute_fov_mask
 
         for idx, img_path in enumerate(self.image_paths):
             raw = cv2.imread(str(img_path))

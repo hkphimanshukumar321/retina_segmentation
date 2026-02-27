@@ -247,6 +247,7 @@ def _build_test_generator(config, quick_test: bool = False):
         batch_size=config.training.batch_size,
         augmentations=None,
         check_files=True,
+        enable_copy_paste=False,   # No copy-paste at test/val time
     )
     return test_gen
 
@@ -268,9 +269,13 @@ def _train_model(model, train_gen, val_gen, config, results_dir: Path,
     # Choose loss based on model name
     model_name_lower = model.name.lower() if hasattr(model, "name") else ""
     if "ghost" in model_name_lower:
+        # Class-weighted Tversky: MA x3.0, HE x1.5, EX x1.0, SE x2.5, OD x0.5
+        # Matches pilot_test.py — Porwal et al. MedIA 2020 top-team strategy
+        IDRID_CLASS_WEIGHTS = [3.0, 1.5, 1.0, 2.5, 0.5]
         loss_fn = combined_loss_v2(
             w_lovasz=0.5, w_focal_tversky=0.3, w_bce=0.2,
             ft_alpha=0.3, ft_beta=0.7, ft_gamma=0.75,
+            class_weights=IDRID_CLASS_WEIGHTS,
         )
     else:
         loss_fn = combined_loss(alpha=0.3, beta=0.7, gamma=0.75)
@@ -348,6 +353,43 @@ def _train_model(model, train_gen, val_gen, config, results_dir: Path,
                 msg += f" - val_dice: {display_logs.get('val_dice_score', 0):.4f}"
             print(msg)
 
+    CLASS_NAMES_RUN = ("MA", "HE", "EX", "SE", "OD")
+
+    class PerClassMetricsCallback(tf.keras.callbacks.Callback):
+        """Print per-class IoU & Dice on val_gen every epoch (mirrors pilot_test.py)."""
+        def __init__(self, generator, num_classes, class_names, threshold=0.5, every_n=1):
+            super().__init__()
+            self.generator = generator; self.num_classes = num_classes
+            self.class_names = class_names; self.threshold = threshold
+            self.every_n = every_n
+
+        def on_epoch_end(self, epoch, logs=None):
+            if (epoch + 1) % self.every_n != 0: return
+            y_true_list, y_pred_list = [], []
+            for i in range(len(self.generator)):
+                bx, by = self.generator[i]
+                preds = self.model.predict(bx, verbose=0)
+                if isinstance(preds, list): preds = preds[0]
+                gt = by if not isinstance(by, dict) else by["main_out"]
+                y_true_list.append(gt); y_pred_list.append(preds)
+            y_true = np.concatenate(y_true_list, axis=0)
+            y_pred = (np.concatenate(y_pred_list, axis=0) > self.threshold).astype(np.float32)
+            print(f"\n  +-- Per-Class Val IoU/Dice (Epoch {epoch+1}) ------+")
+            print(f"  | {'Class':<5}  {'IoU':>6}  {'Dice':>6}  {'GT px':>8}  Status")
+            print(f"  | {'-'*48}")
+            for c in range(self.num_classes):
+                name = self.class_names[c] if c < len(self.class_names) else f"C{c}"
+                gt_c = y_true[..., c]; pr_c = y_pred[..., c]; gt_px = int(gt_c.sum())
+                tp = float(np.sum(gt_c * pr_c)); fp = float(np.sum((1-gt_c)*pr_c))
+                fn = float(np.sum(gt_c*(1-pr_c)))
+                iou = tp/(tp+fp+fn) if (tp+fp+fn)>0 else float("nan")
+                dice = 2*tp/(2*tp+fp+fn) if (2*tp+fp+fn)>0 else float("nan")
+                iou_s = f"{iou:.4f}" if not np.isnan(iou) else "  nan "
+                dice_s = f"{dice:.4f}" if not np.isnan(dice) else "  nan "
+                flag = "  << STARVING" if (np.isnan(iou) or iou < 0.05) else ""
+                print(f"  | {name:<5}  {iou_s:>6}  {dice_s:>6}  {gt_px:>8,}{flag}")
+            print(f"  +{'-'*52}+\n")
+
     # --- Callbacks ---
     callbacks = [
         SimpleLogger(),
@@ -364,6 +406,13 @@ def _train_model(model, train_gen, val_gen, config, results_dir: Path,
         ),
         tf.keras.callbacks.CSVLogger(
             str(results_dir / f"{model_prefix}_training_log.csv")
+        ),
+        PerClassMetricsCallback(
+            generator=val_gen,
+            num_classes=config.model.num_classes,
+            class_names=CLASS_NAMES_RUN,
+            threshold=0.5,
+            every_n=1,
         ),
     ]
 
