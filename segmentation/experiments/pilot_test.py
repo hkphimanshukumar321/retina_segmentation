@@ -365,6 +365,55 @@ def main(quick_test: bool = False):
             
             print(msg)
 
+    CLASS_NAMES_CB = ("MA", "HE", "EX", "SE", "OD")
+
+    class PerClassMetricsCallback(tf.keras.callbacks.Callback):
+        """Print per-class IoU & Dice on val_gen after every epoch.
+        Classes with IoU < 0.05 are flagged STARVING for immediate visibility.
+        """
+        def __init__(self, generator, num_classes, class_names,
+                     threshold=0.5, every_n=1):
+            super().__init__()
+            self.generator   = generator
+            self.num_classes = num_classes
+            self.class_names = class_names
+            self.threshold   = threshold
+            self.every_n     = every_n
+
+        def on_epoch_end(self, epoch, logs=None):
+            if (epoch + 1) % self.every_n != 0:
+                return
+            y_true_list, y_pred_list = [], []
+            for i in range(len(self.generator)):
+                bx, by = self.generator[i]
+                preds = self.model.predict(bx, verbose=0)
+                if isinstance(preds, list):
+                    preds = preds[0]  # main head
+                gt = by if not isinstance(by, dict) else by["main_out"]
+                y_true_list.append(gt)
+                y_pred_list.append(preds)
+            y_true = np.concatenate(y_true_list, axis=0)
+            y_pred = (np.concatenate(y_pred_list, axis=0) > self.threshold).astype(np.float32)
+
+            print(f"\n  +-- Per-Class Val IoU/Dice  (Epoch {epoch+1}) ------+")
+            print(f"  | {'Class':<5}  {'IoU':>6}  {'Dice':>6}  {'GT px':>8}  Status")
+            print(f"  | {'─'*48}")
+            for c in range(self.num_classes):
+                name  = self.class_names[c] if c < len(self.class_names) else f"C{c}"
+                gt_c  = y_true[..., c]
+                pr_c  = y_pred[..., c]
+                gt_px = int(gt_c.sum())
+                tp = float(np.sum(gt_c * pr_c))
+                fp = float(np.sum((1-gt_c) * pr_c))
+                fn = float(np.sum(gt_c * (1-pr_c)))
+                iou  = tp/(tp+fp+fn)   if (tp+fp+fn)  >0 else float("nan")
+                dice = 2*tp/(2*tp+fp+fn) if (2*tp+fp+fn)>0 else float("nan")
+                iou_s  = f"{iou:.4f}"  if not np.isnan(iou)  else "  nan "
+                dice_s = f"{dice:.4f}" if not np.isnan(dice) else "  nan "
+                flag   = "  << STARVING" if (np.isnan(iou) or iou < 0.05) else ""
+                print(f"  | {name:<5}  {iou_s:>6}  {dice_s:>6}  {gt_px:>8,}{flag}")
+            print(f"  +{'─'*52}+\n")
+
     # ---- Callbacks ----
     callbacks = [
         tf.keras.callbacks.ModelCheckpoint(
@@ -372,7 +421,7 @@ def main(quick_test: bool = False):
             monitor="val_loss",
             save_best_only=True,
             save_weights_only=True,
-            verbose=0, # Quiet
+            verbose=0,
         ),
         tf.keras.callbacks.ReduceLROnPlateau(
             monitor="val_loss", factor=0.5, patience=5, min_lr=1e-6, verbose=1,
@@ -381,7 +430,14 @@ def main(quick_test: bool = False):
             monitor="val_loss", patience=10, restore_best_weights=True, verbose=1,
         ),
         tf.keras.callbacks.CSVLogger(str(results_dir / "pilot_training_log.csv")),
-        SimpleLogger() # Add custom logger
+        SimpleLogger(),
+        PerClassMetricsCallback(
+            generator=val_gen,
+            num_classes=NUM_CLASSES,
+            class_names=CLASS_NAMES_CB,
+            threshold=0.5,
+            every_n=1,   # every epoch; set to 2-5 to reduce overhead
+        ),
     ]
 
     # ---- Deep supervision wrapper: generators must yield (X, [Y, Y, Y]) ----
