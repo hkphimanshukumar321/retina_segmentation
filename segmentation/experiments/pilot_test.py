@@ -264,10 +264,14 @@ def main(quick_test: bool = False):
             learning_rate=LEARNING_RATE, clipnorm=1.0
         )
 
-        # v2 loss: Lovász-Softmax + Focal Tversky + BCE
+        # v2 loss: Lovász + Class-Weighted Focal Tversky + BCE
+        # Class weights: MA×3.0, HE×1.5, EX×1.0, SE×2.5, OD×0.5
+        # Source: IDRiD challenge top-team strategy (Porwal et al. MedIA 2020)
+        IDRID_CLASS_WEIGHTS = [3.0, 1.5, 1.0, 2.5, 0.5]  # MA, HE, EX, SE, OD
         loss_fn = combined_loss_v2(
             w_lovasz=0.5, w_focal_tversky=0.3, w_bce=0.2,
             ft_alpha=0.3, ft_beta=0.7, ft_gamma=0.75,
+            class_weights=IDRID_CLASS_WEIGHTS,
         )
 
         # For deep supervision: apply same loss to main + aux outputs with weights
@@ -536,10 +540,24 @@ def main(quick_test: bool = False):
         if isinstance(preds, list): preds = preds[0]
         y_pred_list.append(preds)
 
-    y_true_val = np.concatenate(y_true_list)
-    y_pred_val = np.concatenate(y_pred_list)
+    # Per-class thresholds (Technique 6): lower for sparse classes
+    # MA=0.30 SE=0.35 — more permissive to boost recall on starving classes
+    # OD=0.55 — stricter to reduce false positives on this easy class
+    # EAD-Net (TMI 2021) and Prototype Net (MDPI 2022) both use per-class thresholds
+    PER_CLASS_THR = [0.30, 0.45, 0.50, 0.35, 0.55]  # MA, HE, EX, SE, OD
 
-    val_iou  = compute_iou(y_true_val, y_pred_val, NUM_CLASSES)
+    def _apply_thresholds(pred, thr):
+        """Apply per-class thresholds to (N,H,W,C) sigmoid predictions."""
+        out = np.zeros_like(pred)
+        for c, t in enumerate(thr):
+            out[..., c] = (pred[..., c] > t).astype(np.float32)
+        return out
+
+    y_true_val = np.concatenate(y_true_list)
+    y_pred_val_raw = np.concatenate(y_pred_list)
+    y_pred_val = _apply_thresholds(y_pred_val_raw, PER_CLASS_THR)
+
+    val_iou  = compute_iou(y_true_val,  y_pred_val, NUM_CLASSES)
     val_dice = compute_dice(y_true_val, y_pred_val, NUM_CLASSES)
 
     # -----------------------------------------------------------------------

@@ -114,42 +114,98 @@ def combined_loss(alpha=0.3, beta=0.7, gamma=0.75):
     Retained for backward compatibility.
     """
     ft_loss = focal_tversky_loss(alpha, beta, gamma)
-    
+
     def loss(y_true, y_pred):
         bce_loss = tf.reduce_mean(tf.keras.losses.binary_crossentropy(y_true, y_pred))
         return bce_loss + ft_loss(y_true, y_pred)
-        
+
+    return loss
+
+
+# =============================================================================
+# CLASS-WEIGHTED FOCAL TVERSKY  (IDRiD literature — sparse class up-weighting)
+# =============================================================================
+
+def class_weighted_focal_tversky_loss(
+    class_weights=None,
+    alpha: float = 0.3,
+    beta: float = 0.7,
+    gamma: float = 0.75,
+    smooth: float = 1e-6,
+):
+    """Per-class weighted Focal Tversky Loss.
+
+    Each class contributes its Tversky loss multiplied by a class weight.
+    Sparse/hard classes (MA, SE) get higher weights; easy classes (OD) get lower.
+
+    Default weights:
+        [3.0, 1.5, 1.0, 2.5, 0.5]  = [MA, HE, EX, SE, OD]
+
+    Up-weights MA×3 and SE×2.5 — from IDRiD challenge top-team strategy.
+    Normalised so total weight = num_classes (no overall scale shift).
+
+    References:
+        Abraham & Khan, "A Novel Focal Tversky Loss", ISBI 2019.
+        Top IDRiD challenge submissions (Porwal et al. MedIA 2020).
+    """
+    DEFAULT_WEIGHTS = [3.0, 1.5, 1.0, 2.5, 0.5]  # MA, HE, EX, SE, OD
+
+    def loss(y_true, y_pred):
+        n_classes = tf.shape(y_pred)[-1]
+        weights = class_weights if class_weights is not None else DEFAULT_WEIGHTS
+
+        total = 0.0
+        total_w = sum(weights[:len(weights)])
+
+        for c in range(len(weights)):
+            w  = weights[c]
+            yt = tf.reshape(y_true[..., c], [-1])
+            yp = tf.reshape(y_pred[..., c], [-1])
+
+            tp = K.sum(yt * yp)
+            fp = K.sum((1.0 - yt) * yp)
+            fn = K.sum(yt * (1.0 - yp))
+
+            ti = (tp + smooth) / (tp + alpha * fp + beta * fn + smooth)
+            total += w * K.pow(1.0 - ti, gamma)
+
+        # Normalise by total weight so magnitude is comparable to base FT loss
+        return total / (total_w + smooth)
+
     return loss
 
 
 def combined_loss_v2(
-    w_lovasz=0.5,
-    w_focal_tversky=0.3,
-    w_bce=0.2,
-    ft_alpha=0.3,
-    ft_beta=0.7,
-    ft_gamma=0.75,
+    w_lovasz: float = 0.5,
+    w_focal_tversky: float = 0.3,
+    w_bce: float = 0.2,
+    ft_alpha: float = 0.3,
+    ft_beta: float = 0.7,
+    ft_gamma: float = 0.75,
+    class_weights=None,          # NEW: pass list to enable per-class weighting
 ):
-    """Combined Loss v2: Lovász-Softmax + Focal Tversky + BCE.
-    
+    """Combined Loss v2: Lovász-Softmax + (Class-Weighted) Focal Tversky + BCE.
+
+    When class_weights is provided (default: [3.0,1.5,1.0,2.5,0.5] for
+    IDRID 5-class), uses class_weighted_focal_tversky_loss instead of the
+    uniform version. This specifically helps MA and SE which are starved.
+
     • Lovász directly optimizes IoU (biggest impact)
-    • Focal Tversky targets sparse FN (tiny lesions like MA)
-    • BCE provides smooth gradients for early training stability
-    
-    Args:
-        w_lovasz: Weight for Lovász-Softmax component
-        w_focal_tversky: Weight for Focal Tversky component
-        w_bce: Weight for BCE component
+    • Class-Weighted Focal Tversky up-weights MA/SE false negatives
+    • BCE provides stable gradients in early epochs
     """
     lov = lovasz_softmax_loss()
-    ft = focal_tversky_loss(ft_alpha, ft_beta, ft_gamma)
-    
+    if class_weights is not None:
+        ft = class_weighted_focal_tversky_loss(class_weights, ft_alpha, ft_beta, ft_gamma)
+    else:
+        ft = focal_tversky_loss(ft_alpha, ft_beta, ft_gamma)
+
     def loss(y_true, y_pred):
         bce_loss = tf.reduce_mean(tf.keras.losses.binary_crossentropy(y_true, y_pred))
         return (
-            w_lovasz * lov(y_true, y_pred)
+            w_lovasz         * lov(y_true, y_pred)
             + w_focal_tversky * ft(y_true, y_pred)
-            + w_bce * bce_loss
+            + w_bce           * bce_loss
         )
-    
+
     return loss

@@ -25,7 +25,15 @@ class DataConfig:
     img_size: Tuple[int, int] = (256, 256)  # Patch / input resolution
     label_ids: Tuple[int, ...] = (255, 127, 63)  # Refined IDRiD: MA=255, HE=127, EX=63
     bit_values: Optional[List[int]] = None  # Legacy bitmask (unused for IDRiD)
-    prob_lesion: float = 0.5                # Probability of lesion-centred sampling
+
+    # ── Lesion-aware sampling (Technique 3) ──────────────────────────────────
+    prob_lesion: float = 0.8             # ↑ 0.5→0.8: more lesion-centred patches
+    prob_ma_targeted: float = 0.3       # Extra prob of forcing patch onto MA/SE pixels
+
+    # ── Retinal Preprocessing (Techniques 1 & 2) ─────────────────────────────
+    use_ben_graham: bool = True          # Ben Graham illumination normalization
+    use_clahe: bool = True               # CLAHE on LAB L-channel
+    clahe_clip: float = 2.0             # CLAHE clip limit
 
 
 @dataclass
