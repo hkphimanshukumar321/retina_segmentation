@@ -547,10 +547,19 @@ def create_ghost_unet_v2(
             )(aux)
             aux_outputs.append(aux)
 
-    # ---- OUTPUT ----
-    main_output = layers.Conv2D(
-        num_classes, 1, activation='sigmoid', name='main_out'
-    )(x)
+    # ---- OUTPUT: Per-class prediction heads (Rank-1 IDRiD strategy) ----
+    # Each class gets independent 3×3 feature refinement so MA can learn
+    # tiny-dot patterns without competing with OD's large-circle pattern.
+    CLASS_HEAD_NAMES = ["MA", "HE", "EX", "SE", "OD"]
+    heads = []
+    for c in range(num_classes):
+        cname = CLASS_HEAD_NAMES[c] if c < len(CLASS_HEAD_NAMES) else f"C{c}"
+        h = layers.Conv2D(32, 3, padding='same', activation='relu',
+                          name=f'head_{cname}_conv')(x)
+        h = layers.Conv2D(1, 1, activation='sigmoid',
+                          name=f'head_{cname}')(h)
+        heads.append(h)
+    main_output = layers.Concatenate(name='main_out')(heads)
     # Upsample main to match input if output stride != 1
     # (output stride 8 → need 1 upsample of /1 since last stage had no pool,
     #  but first conv2dtranspose skipped → net output is at stride 1 if decoder

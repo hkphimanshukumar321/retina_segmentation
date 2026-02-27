@@ -139,9 +139,15 @@ class IDRIDPatchDataGenerator(PatchDataGenerator):
     # ─────────────────────────────────────────────────────────────────────────
 
     def _load_merged_mask(self, img_stem: str, original_hw: Tuple[int, int]) -> np.ndarray:
-        """Load all 5 class masks and merge into (H, W, 5) uint8 binary."""
+        """Load all 5 class masks and merge into (H, W, 5) uint8 binary.
+        
+        MA (class 0) and SE (class 3) masks are dilated by 7px to expand
+        tiny lesion targets — "soft boundary expansion" from top IDRiD teams.
+        """
         h, w = original_hw
         merged = np.zeros((h, w, 5), dtype=np.uint8)
+        # 7px elliptical kernel for MA/SE dilation
+        _dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         for c, (subfolder, suffix) in enumerate(zip(self.SUBFOLDERS, self.SUFFIXES)):
             p = self.mask_root_dir / subfolder / f"{img_stem}{suffix}.tif"
             if p.exists():
@@ -150,7 +156,11 @@ class IDRIDPatchDataGenerator(PatchDataGenerator):
                     continue
                 if m.shape != (h, w):
                     m = cv2.resize(m, (w, h), interpolation=cv2.INTER_NEAREST)
-                merged[..., c] = (m > 0).astype(np.uint8)
+                binary = (m > 0).astype(np.uint8)
+                # Dilate sparse classes — MA and SE lesions are too small at 256-512px
+                if c in self.SPARSE_CLASS_INDICES:
+                    binary = cv2.dilate(binary, _dilate_kernel, iterations=1)
+                merged[..., c] = binary
         return merged
 
     # ─────────────────────────────────────────────────────────────────────────
