@@ -192,6 +192,14 @@ def _build_generators(train_imgs, train_masks, val_imgs, val_masks, config,
     patches_tr  = 2 if quick_test else config.training.patches_per_image
     patches_val = 2 if quick_test else config.training.patches_per_image_val
 
+    # Quick-test safety: guarantee at least 1 full batch for val generator.
+    # With 11 val images × 2 patches = 22 < batch_size(64) → length 0 crash.
+    # Fix: ensure patches_val × n_val_images >= batch_size.
+    if quick_test:
+        n_val_imgs = len(list(idrid_val_imgs.glob("*.jpg"))) if use_idrid else max(1, len(val_imgs))
+        bs = config.training.batch_size
+        patches_val = max(patches_val, -(-bs // max(n_val_imgs, 1)) + 1)  # ceiling div + 1
+
     if use_idrid:
         from src.idrid_loader import IDRIDPatchDataGenerator
         logger.info("Using IDRID dataset for training.")
