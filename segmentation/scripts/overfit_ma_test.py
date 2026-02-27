@@ -122,10 +122,17 @@ def load_single_sample(image_stem, patch_size=256):
         ma = cv2.resize(ma, (w, h), interpolation=cv2.INTER_NEAREST)
 
     ma_bin = (ma > 0).astype(np.uint8)
+
+    # ── Apply 7px elliptical dilation (matches idrid_loader.py) ──
+    # This is Component 1: "soft boundary expansion" — expands each
+    # MA lesion from ~15px to ~50px, making it learnable.
+    dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    ma_bin = cv2.dilate(ma_bin, dilate_kernel, iterations=1)
+
     total_ma = int(ma_bin.sum())
     print(f"\n  Image: {image_stem}")
     print(f"  Size: {w}×{h}")
-    print(f"  MA pixels: {total_ma:,}")
+    print(f"  MA pixels (after 7px dilation): {total_ma:,}")
 
     # Extract patches centred on MA lesions
     patches_img, patches_mask = [], []
