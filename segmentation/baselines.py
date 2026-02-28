@@ -57,11 +57,18 @@ def _aspp_block(x, filters=256, rates=(6, 12, 18)):
     gap = layers.Conv2D(filters, 1, padding="same", use_bias=False)(gap)
     gap = layers.BatchNormalization()(gap)
     gap = layers.Activation("relu")(gap)
-    # Resize GAP output to match spatial dims of x (must use Lambda for dynamic shape)
-    gap = layers.Lambda(
-        lambda args: tf.image.resize(args[0], tf.shape(args[1])[1:3]),
-        name="aspp_gap_resize",
-    )([gap, x])
+    # Use UpSampling2D instead of Lambda for clean serialization (Raspberry Pi compatible)
+    h = tf.keras.backend.int_shape(x)[1]  # may be None for dynamic shapes
+    w = tf.keras.backend.int_shape(x)[2]
+    if h is not None and w is not None:
+        gap = layers.UpSampling2D(size=(h, w), interpolation="bilinear")(gap)
+    else:
+        # Dynamic shape fallback using a named layer subclass
+        target_shape = tf.shape(x)[1:3]
+        gap = layers.Lambda(
+            lambda t: tf.image.resize(t[0], tf.shape(t[1])[1:3]),
+            name="aspp_gap_resize",
+        )([gap, x])
     branches.append(gap)
 
     # Concatenate + 1×1 projection

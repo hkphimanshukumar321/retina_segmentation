@@ -1,237 +1,327 @@
 # -*- coding: utf-8 -*-
 # ==============================================================================
 # Copyright (c) 2026 Himanshu Kumar, IIT Bhubaneswar. All Rights Reserved.
-# Email: hkphimanshukumar321@gmail.com
 # ==============================================================================
-
 """
-RPi Inference Benchmark
-=======================
+RPi Standalone Inference Benchmark
+====================================
+Copy ONLY this file + your .keras/.h5 model file to the Raspberry Pi.
+No other project files needed. Just TensorFlow must be installed.
 
-Rebuilds the Ghost-CAS-UNet architecture and loads saved weights,
-then measures CPU-only inference latency.
+USAGE:
+  # Option 1: Edit MODEL_PATH below and run directly
+  python rpi_benchmark.py
 
-Designed to run identically on a local PC (baseline) and on a Raspberry Pi.
+  # Option 2: Pass the model path as an argument
+  python rpi_benchmark.py --model path/to/model.keras
+  python rpi_benchmark.py --model path/to/model.keras --runs 50 --resolution 256
 
-Usage (local baseline):
-    python -m segmentation.experiments.rpi_benchmark
+  # Option 3: If model is in the same folder as this script
+  python rpi_benchmark.py --model model_filename.keras
 
-    python -m segmentation.experiments.rpi_benchmark \
-        --weights results/pilot/pilot_model.weights.h5 \
-        --runs 100 \
-        --resolution 128
+INSTALL REQUIREMENTS ON RPi:
+  pip install tensorflow
+  pip install psutil          # optional, for better memory measurement
 
-Usage (on RPi — copy this file + weights + src/models.py):
-    python rpi_benchmark.py --weights pilot_model.weights.h5 --runs 50
-
-Outputs → inference_benchmark.json
+OUTPUT:
+  Prints latency + memory stats to screen.
+  Saves results to <model_name>_benchmark.json in the same folder.
 """
 
 import sys
-import argparse
 import json
 import time
+import argparse
+import traceback
 from pathlib import Path
 
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Path setup
-# ---------------------------------------------------------------------------
-SCRIPT_DIR = Path(__file__).parent.resolve()
-SEG_DIR    = SCRIPT_DIR.parent.resolve()
-ROOT_DIR   = SEG_DIR.parent.resolve()
-
-sys.path.insert(0, str(ROOT_DIR))
-sys.path.insert(0, str(SEG_DIR))
+# ===========================================================================
+# ▼▼▼ EDIT THIS IF YOU DON'T WANT TO USE --model ARGUMENT ▼▼▼
+# Set to the full path of your .keras or .h5 model file
+# Use None to require the --model argument
+# ===========================================================================
+MODEL_PATH = None          # Example: "deeplabv3plus_resnet50_final.keras"
+                           # Example: "/home/pi/models/ghost_cas_unet.keras"
 
 # ===========================================================================
-# Defaults (must match pilot_test.py sweet-spot config)
+# Default benchmark settings (override with command-line args if needed)
 # ===========================================================================
-DEFAULT_WEIGHTS    = SEG_DIR / "results" / "pilot" / "pilot_model.weights.h5"
-DEFAULT_KERAS      = SEG_DIR / "results" / "pilot" / "pilot_model.keras"
-DEFAULT_RESOLUTION = 256   # Must match pilot_test.py IMG_SIZE
+DEFAULT_RESOLUTION = 256   # Change if your model uses a different input size
 DEFAULT_NUM_RUNS   = 100
 DEFAULT_WARMUP     = 10
 
-# Architecture config (must EXACTLY match pilot_test.py sweet-spot config)
-NUM_CLASSES     = 5                     # MA, HE, EX, SE, OD
-ENCODER_FILTERS = [32, 64, 128, 256]   # v2: wider filters
-GHOST_RATIO     = 2
-DROPOUT         = 0.15
-USE_SKIP_ATTN   = True
-USE_ASPP        = True
-DEEP_SUPERVISION = True
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def get_memory_mb() -> float:
+    """Return current process memory usage in MB."""
+    try:
+        import psutil, os
+        return psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+    except ImportError:
+        pass
+    try:
+        import resource
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # KB→MB on Linux
+    except Exception:
+        return -1.0
 
 
-def main(
-    weights_path: str = None,
-    resolution: int = DEFAULT_RESOLUTION,
-    n_runs: int = DEFAULT_NUM_RUNS,
-    n_warmup: int = DEFAULT_WARMUP,
-    output_dir: str = None,
-):
+def load_any_model(model_path: Path):
+    """
+    Load a Keras model from .keras or .h5 file.
+    Handles Lambda/custom-layer models by extracting embedded weights.
+    Does NOT require any project code.
+    """
     import tensorflow as tf
 
-    # ---- Force CPU (simulate RPi) ----
+    suffix = model_path.suffix.lower()
+
+    # ------------------------------------------------------------------ .h5
+    if suffix == ".h5":
+        print(f"[*] Loading H5 model: {model_path.name}")
+        try:
+            model = tf.keras.models.load_model(str(model_path), compile=False)
+            print("[*] Loaded OK.")
+            return model
+        except Exception as e:
+            raise RuntimeError(f"Failed to load H5 model: {e}")
+
+    # ---------------------------------------------------------------- .keras
+    if suffix == ".keras":
+        print(f"[*] Loading .keras model: {model_path.name}")
+
+        # Attempt 1: plain load (works for standard models)
+        try:
+            model = tf.keras.models.load_model(str(model_path), compile=False)
+            print("[*] Loaded OK.")
+            return model
+        except Exception:
+            pass
+
+        # Attempt 2: safe_mode=False
+        try:
+            model = tf.keras.models.load_model(str(model_path), compile=False, safe_mode=False)
+            print("[*] Loaded OK (safe_mode=False).")
+            return model
+        except Exception:
+            pass
+
+        # Attempt 3: .keras is a ZIP. Extract model.weights.h5, load as weights-only
+        # into a newly rebuilt architecture from the config stored inside the zip.
+        print("[!] Standard load failed (likely Lambda/custom layers).")
+        print("[*] Trying to extract & load weights from inside the .keras archive ...")
+        import zipfile, tempfile, json as _json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            with zipfile.ZipFile(str(model_path), 'r') as zf:
+                zf.extractall(str(tmpdir))
+
+            config_file = tmpdir / "config.json"
+            weights_file = tmpdir / "model.weights.h5"
+
+            if not config_file.exists() or not weights_file.exists():
+                raise RuntimeError(
+                    f"Cannot load {model_path.name}.\n"
+                    "The model uses custom layers that cannot be deserialized on this device.\n"
+                    "FIX: On your training machine, re-save the model after removing Lambda layers,\n"
+                    "     then copy the new .keras file to the RPi."
+                )
+
+            # Reconstruct model from the serialized config
+            with open(config_file) as f:
+                cfg = _json.load(f)
+
+            try:
+                model = tf.keras.models.model_from_json(_json.dumps(cfg["config"]))
+            except Exception as e:
+                raise RuntimeError(
+                    f"Could not reconstruct model from config: {e}\n"
+                    "The model has custom objects that block deserialization on this device."
+                )
+
+            model.load_weights(str(weights_file))
+            print("[*] Model reconstructed from config + weights. OK.")
+            return model
+
+    raise ValueError(f"Unsupported file type: {suffix}. Use .keras or .h5")
+
+
+# ---------------------------------------------------------------------------
+# Main benchmark function
+# ---------------------------------------------------------------------------
+def run_benchmark(
+    model_path: str,
+    resolution: int  = DEFAULT_RESOLUTION,
+    n_runs: int      = DEFAULT_NUM_RUNS,
+    n_warmup: int    = DEFAULT_WARMUP,
+    output_dir: str  = None,
+) -> bool:
+    import tensorflow as tf
+
+    # Force CPU only — simulates/matches RPi hardware
     tf.config.set_visible_devices([], "GPU")
-    print("[*] GPU disabled — running on CPU only")
+    print("[*] GPU disabled — CPU only (RPi mode)")
 
-    # ---- Resolve weights path ----
-    weights_path = Path(weights_path) if weights_path else DEFAULT_WEIGHTS
-
-    # Fallback: if user pointed to .keras file, check if .weights.h5 exists
-    if weights_path.suffix == ".keras":
-        w_alt = weights_path.with_suffix(".weights.h5")
-        if w_alt.exists():
-            weights_path = w_alt
-        else:
-            print(f"[WARN] .keras file given but no .weights.h5 found next to it.")
-            print(f"       Tried: {w_alt}")
-
-    if not weights_path.exists():
-        print(f"[ERROR] Weights not found: {weights_path}")
-        print("        Run pilot_test.py first to generate the weights.")
+    model_path = Path(model_path).resolve()
+    if not model_path.exists():
+        print(f"[ERROR] File not found: {model_path}")
+        print("        Make sure the model file is in the same folder as this script,")
+        print("        or pass the full path with --model.")
         return False
 
-    print(f"\n{'='*60}")
+    print(f"\n{'='*58}")
     print("  RPi INFERENCE BENCHMARK")
-    print(f"{'='*60}")
-    print(f"  Weights    : {weights_path.name}")
-    print(f"  Resolution : {resolution}×{resolution}")
-    print(f"  Warmup     : {n_warmup}")
-    print(f"  Runs       : {n_runs}")
+    print(f"{'='*58}")
+    print(f"  Model      : {model_path.name}")
+    print(f"  Resolution : {resolution} x {resolution}")
+    print(f"  Warmup     : {n_warmup} passes")
+    print(f"  Runs       : {n_runs} passes")
+    print(f"{'='*58}\n")
 
-    # ---- Rebuild model architecture ----
-    from segmentation.src.models import SEGMENTATION_MODELS
+    # --- Load model ---
+    mem_baseline = get_memory_mb()
+    try:
+        model = load_any_model(model_path)
+    except Exception as e:
+        print(f"\n[FATAL] {e}")
+        return False
 
-    # FIX: must match pilot_test.py exactly — uses ghost_cas_unet_v2 with 5 classes
-    model_fn = SEGMENTATION_MODELS["ghost_cas_unet_v2"]
-    model = model_fn(
-        input_shape=(resolution, resolution, 3),
-        num_classes=NUM_CLASSES,
-        encoder_filters=ENCODER_FILTERS,
-        dropout_rate=DROPOUT,
-        ghost_ratio=GHOST_RATIO,
-        use_skip_attention=USE_SKIP_ATTN,
-        use_aspp=USE_ASPP,
-        deep_supervision=DEEP_SUPERVISION,
-    )
-
-    # ---- Load weights ----
-    model.load_weights(str(weights_path))
-    print("[*] Weights loaded successfully")
+    mem_after_load = get_memory_mb()
+    load_mem_delta = max(0.0, mem_after_load - mem_baseline)
 
     total_params  = model.count_params()
-    model_size_mb = weights_path.stat().st_size / (1024 * 1024)
+    file_size_mb  = model_path.stat().st_size / (1024 * 1024)
 
-    # Also report .keras size if available
-    keras_path = weights_path.with_suffix("").with_suffix(".keras")
-    if keras_path.exists():
-        model_size_mb = keras_path.stat().st_size / (1024 * 1024)
+    print(f"\n  Parameters : {total_params:,}")
+    print(f"  File size  : {file_size_mb:.2f} MB")
+    print(f"  Mem (load) : +{load_mem_delta:.1f} MB\n")
 
-    print(f"  Parameters : {total_params:,}")
-    print(f"  Model Size : {model_size_mb:.3f} MB")
-    print(f"{'='*60}\n")
+    # --- Prepare dummy input ---
+    dummy = np.random.rand(1, resolution, resolution, 3).astype(np.float32)
 
-    input_shape = (1, resolution, resolution, 3)
-    dummy_input = np.random.rand(*input_shape).astype(np.float32)
-
-    # ---- Warmup ----
-    print(f"[*] Warming up ({n_warmup} passes) …")
+    # --- Warmup ---
+    print(f"[*] Warmup ({n_warmup} passes) ...")
     with tf.device("/CPU:0"):
         for _ in range(n_warmup):
-            model.predict(dummy_input, verbose=0)
+            model.predict(dummy, verbose=0)
 
-    # ---- Timed runs ----
-    print(f"[*] Benchmarking ({n_runs} passes) …")
-    times_ms = []
+    # --- Timed runs ---
+    print(f"[*] Benchmarking ({n_runs} passes) ...")
+    times = []
+    peak_mem = get_memory_mb()
+
     with tf.device("/CPU:0"):
         for i in range(n_runs):
-            start = time.perf_counter()
-            model.predict(dummy_input, verbose=0)
-            elapsed_ms = (time.perf_counter() - start) * 1000
-            times_ms.append(elapsed_ms)
-            if (i + 1) % 25 == 0:
-                print(f"    [{i+1}/{n_runs}]  {elapsed_ms:.2f} ms")
+            t0 = time.perf_counter()
+            model.predict(dummy, verbose=0)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+            times.append(elapsed_ms)
+            peak_mem = max(peak_mem, get_memory_mb())
+            if n_runs <= 20 or (i + 1) % 25 == 0:
+                print(f"    [{i+1:3d}/{n_runs}]  {elapsed_ms:.1f} ms")
 
-    times_ms = np.array(times_ms)
-    avg_ms = float(np.mean(times_ms))
-    std_ms = float(np.std(times_ms))
-    min_ms = float(np.min(times_ms))
-    max_ms = float(np.max(times_ms))
-    p50_ms = float(np.percentile(times_ms, 50))
-    p95_ms = float(np.percentile(times_ms, 95))
-    fps    = 1000.0 / avg_ms if avg_ms > 0 else 0.0
+    times = np.array(times)
+    avg   = float(np.mean(times))
+    std   = float(np.std(times))
+    p50   = float(np.percentile(times, 50))
+    p95   = float(np.percentile(times, 95))
+    fps   = round(1000.0 / avg, 1) if avg > 0 else 0.0
 
-    # ---- Results ----
+    # --- Print results ---
+    print(f"\n{'='*58}")
+    print("  RESULTS")
+    print(f"{'='*58}")
+    print(f"  Model         : {model_path.stem}")
+    print(f"  Parameters    : {total_params:,}")
+    print(f"  File size     : {file_size_mb:.2f} MB")
+    print(f"  Mem footprint : ~{load_mem_delta:.0f} MB  (load delta)")
+    print(f"  Peak mem      : ~{peak_mem:.0f} MB  (during inference)")
+    print(f"  Avg latency   : {avg:.1f} ± {std:.1f} ms")
+    print(f"  P50 / P95     : {p50:.1f} / {p95:.1f} ms")
+    print(f"  FPS           : {fps}")
+    print(f"{'='*58}")
+
+    # --- Save JSON ---
     results = {
-        "model_name": "Ghost_CAS_UNet",
-        "weights_file": weights_path.name,
+        "model": model_path.stem,
+        "file": model_path.name,
         "resolution": f"{resolution}x{resolution}",
         "total_params": int(total_params),
-        "model_size_mb": round(model_size_mb, 3),
+        "file_size_mb": round(file_size_mb, 2),
+        "device": "CPU",
         "num_runs": n_runs,
         "inference_ms": {
-            "mean": round(avg_ms, 2),
-            "std": round(std_ms, 2),
-            "min": round(min_ms, 2),
-            "max": round(max_ms, 2),
-            "p50": round(p50_ms, 2),
-            "p95": round(p95_ms, 2),
+            "mean": round(avg, 2),
+            "std": round(std, 2),
+            "min": round(float(np.min(times)), 2),
+            "max": round(float(np.max(times)), 2),
+            "p50": round(p50, 2),
+            "p95": round(p95, 2),
         },
-        "fps": round(fps, 1),
-        "device": "CPU",
+        "fps": fps,
+        "mem_load_delta_mb": round(load_mem_delta, 1),
+        "mem_peak_mb": round(peak_mem, 1),
     }
 
-    # ---- Save ----
-    out_dir = Path(output_dir) if output_dir else weights_path.parent
+    out_dir  = Path(output_dir).resolve() if output_dir else model_path.parent
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "inference_benchmark.json"
+    out_path = out_dir / f"{model_path.stem}_benchmark.json"
 
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
 
-    # ---- Print ----
-    print(f"\n{'='*60}")
-    print("  BENCHMARK RESULTS")
-    print(f"{'='*60}")
-    print(f"  Model       : Ghost_CAS_UNet")
-    print(f"  Parameters  : {total_params:,}")
-    print(f"  Size        : {model_size_mb:.3f} MB")
-    print(f"  Inference   : {avg_ms:.2f} ± {std_ms:.2f} ms")
-    print(f"  P50 / P95   : {p50_ms:.2f} / {p95_ms:.2f} ms")
-    print(f"  FPS         : {fps:.1f}")
-    print(f"{'='*60}")
-    print(f"\n  Saved → {out_path}")
-
+    print(f"\n  Saved → {out_path}\n")
     return True
 
 
 # ===========================================================================
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="RPi Inference Benchmark")
-    parser.add_argument("--weights", type=str, default=None,
-                        help=f"Path to .weights.h5 file (default: {DEFAULT_WEIGHTS})")
-    parser.add_argument("--resolution", type=int, default=DEFAULT_RESOLUTION,
-                        help=f"Input resolution (default: {DEFAULT_RESOLUTION})")
-    parser.add_argument("--runs", type=int, default=DEFAULT_NUM_RUNS,
-                        help=f"Number of inference runs (default: {DEFAULT_NUM_RUNS})")
-    parser.add_argument("--warmup", type=int, default=DEFAULT_WARMUP,
-                        help=f"Number of warmup passes (default: {DEFAULT_WARMUP})")
-    parser.add_argument("--output", type=str, default=None,
-                        help="Output directory for results")
+    parser = argparse.ArgumentParser(
+        description="Standalone RPi Benchmark — no project code needed. Just TensorFlow."
+    )
+    parser.add_argument(
+        "--model", "-m", type=str, default=MODEL_PATH,
+        help="Path to .keras or .h5 model file. "
+             f"(default: MODEL_PATH variable = '{MODEL_PATH}')"
+    )
+    parser.add_argument(
+        "--resolution", "-r", type=int, default=DEFAULT_RESOLUTION,
+        help=f"Input patch resolution H=W (default: {DEFAULT_RESOLUTION})"
+    )
+    parser.add_argument(
+        "--runs", type=int, default=DEFAULT_NUM_RUNS,
+        help=f"Number of timed inference passes (default: {DEFAULT_NUM_RUNS})"
+    )
+    parser.add_argument(
+        "--warmup", type=int, default=DEFAULT_WARMUP,
+        help=f"Number of warmup passes (default: {DEFAULT_WARMUP})"
+    )
+    parser.add_argument(
+        "--output", "-o", type=str, default=None,
+        help="Directory to save the JSON results (default: same folder as model)"
+    )
     args = parser.parse_args()
 
+    if args.model is None:
+        print("[ERROR] No model path provided.")
+        print("        Either set MODEL_PATH at the top of this script,")
+        print("        or use:  python rpi_benchmark.py --model your_model.keras")
+        sys.exit(1)
+
     try:
-        success = main(
-            weights_path=args.weights,
+        ok = run_benchmark(
+            model_path=args.model,
             resolution=args.resolution,
             n_runs=args.runs,
             n_warmup=args.warmup,
             output_dir=args.output,
         )
-        sys.exit(0 if success else 1)
-    except Exception as e:
-        print(f"\n[FATAL] {e}")
+        sys.exit(0 if ok else 1)
+    except KeyboardInterrupt:
+        print("\n[!] Interrupted.")
         sys.exit(1)

@@ -1,0 +1,93 @@
+// Ghost-CAS-UNet Architecture
+digraph {
+	dpi=300 fontname=Helvetica rankdir=TB size="8,10" splines=ortho
+	node [color=black fillcolor=white fontname=Helvetica penwidth=1.5 shape=box style="filled,rounded"]
+	edge [color=black penwidth=1.5]
+	In [label="Input Image
+(256 x 256 x 3)" fillcolor="#e0e0e0" shape=parallelogram]
+	E1 [label="Ghost Bottleneck 1
+(16 Filters)" fillcolor="#f0f0f0" shape=box]
+	P1 [label="Max Pool 2x2" shape=invtrapezium]
+	E2 [label="Ghost Bottleneck 2
+(32 Filters)" fillcolor="#f0f0f0" shape=box]
+	P2 [label="Max Pool 2x2" shape=invtrapezium]
+	E3 [label="Ghost Bottleneck 3
+(64 Filters)" fillcolor="#f0f0f0" shape=box]
+	P3 [label="Max Pool 2x2" shape=invtrapezium]
+	E4 [label="Ghost Bottleneck 4
+(128 Filters)" fillcolor="#f0f0f0" shape=box]
+	P4 [label="Max Pool 2x2" shape=invtrapezium]
+	subgraph cluster_enc {
+		fontname="Helvetica-Bold" label=Encoder style=dashed
+	}
+	B1 [label="Ghost Module
+(256 Filters)" fillcolor="#ffe0d0" shape=box]
+	CA [label="Coordinate Attention" fillcolor="#d0e0ff" shape=hexagon]
+	subgraph cluster_btn {
+		fontname="Helvetica-Bold" label=Bottleneck style=dashed
+	}
+	U4 [label="Conv2D Transpose
+(128 Filters)" shape=trapezium]
+	AG4 [label="Attention Gate 4" fillcolor="#d0e0ff" shape=hexagon]
+	C4 [label=Concatenate shape=circle]
+	D4 [label="Ghost Bottleneck D4
+(128 Filters)" fillcolor="#f0f0f0" shape=box]
+	U3 [label="Conv2D Transpose
+(64 Filters)" shape=trapezium]
+	AG3 [label="Attention Gate 3" fillcolor="#d0e0ff" shape=hexagon]
+	C3 [label=Concatenate shape=circle]
+	D3 [label="Ghost Bottleneck D3
+(64 Filters)" fillcolor="#f0f0f0" shape=box]
+	U2 [label="Conv2D Transpose
+(32 Filters)" shape=trapezium]
+	AG2 [label="Attention Gate 2" fillcolor="#d0e0ff" shape=hexagon]
+	C2 [label=Concatenate shape=circle]
+	D2 [label="Ghost Bottleneck D2
+(32 Filters)" fillcolor="#f0f0f0" shape=box]
+	U1 [label="Conv2D Transpose
+(16 Filters)" shape=trapezium]
+	AG1 [label="Attention Gate 1" fillcolor="#d0e0ff" shape=hexagon]
+	C1 [label=Concatenate shape=circle]
+	D1 [label="Ghost Bottleneck D1
+(16 Filters)" fillcolor="#f0f0f0" shape=box]
+	subgraph cluster_dec {
+		fontname="Helvetica-Bold" label=Decoder style=dashed
+	}
+	Out [label="1x1 Conv + Sigmoid
+Output Masks (5 Classes)" fillcolor="#e0e0e0" shape=ellipse]
+	In -> E1
+	E1 -> P1
+	P1 -> E2
+	E2 -> P2
+	P2 -> E3
+	E3 -> P3
+	P3 -> E4
+	E4 -> P4
+	P4 -> B1
+	B1 -> CA
+	CA -> U4
+	U4 -> C4
+	C4 -> D4
+	D4 -> U3
+	U3 -> C3
+	C3 -> D3
+	D3 -> U2
+	U2 -> C2
+	C2 -> D2
+	D2 -> U1
+	U1 -> C1
+	C1 -> D1
+	D1 -> Out
+	E4 -> AG4 [constraint=false style=dashed]
+	U4 -> AG4 [constraint=false style=dashed]
+	AG4 -> C4 [constraint=false]
+	E3 -> AG3 [constraint=false style=dashed]
+	U3 -> AG3 [constraint=false style=dashed]
+	AG3 -> C3 [constraint=false]
+	E2 -> AG2 [constraint=false style=dashed]
+	U2 -> AG2 [constraint=false style=dashed]
+	AG2 -> C2 [constraint=false]
+	E1 -> AG1 [constraint=false style=dashed]
+	U1 -> AG1 [constraint=false style=dashed]
+	AG1 -> C1 [constraint=false]
+}

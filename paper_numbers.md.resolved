@@ -1,0 +1,41 @@
+# Retina Scan Paper Metrics Tracker
+
+This file stores the precise numerical statistics extracted from the `comparrables` training logs and [deeplab](file:///c:/Users/hkphi/OneDrive/Desktop/WORK/retina_scan/segmentation/baselines.py#82-144) test metrics JSON for accurate reference and cross-validation against the LaTeX source code.
+
+## 1. Overall Performance Metrics (Validation/Test)
+
+| Model | Peak Validation Dice (%) | Peak Validation IoU (%) | Note |
+| :--- | :--- | :--- | :--- |
+| **SM-UNet** | 59.24 % | 58.43 % | `val_dice_score` and `val_iou_score` epoch ~52 |
+| **DeepLabV3+** | 50.80 % | 40.89 % | From [deeplabv3plus_resnet50_test_metrics.json](file:///c:/Users/hkphi/OneDrive/Desktop/WORK/retina_scan/comparrables/deeplabv3plus/deeplabv3plus_resnet50_test_metrics.json) |
+| **Ghost-CAS (Proposed)** | 74.40 % | 74.27 % | `val_main_out_dice_score` epoch ~43 |
+
+## 2. Class-Wise Dice Coefficients
+
+| Model | Exudates (EX) | Haemorrhages (HE) | Microaneurysms (MA) | Soft Exudates (SE) |
+| :--- | :--- | :--- | :--- | :--- |
+| **SM-UNet** | 59.01 % | 40.11 % | 58.47 % | 0.00 % |
+| **DeepLabV3+** | 0.00 % | 39.74 % | 76.76 % | 42.59 % |
+| **Ghost-CAS (Proposed)** | 68.19 % | 54.21 % | 81.42 % | 45.01 % |
+
+## 3. Edge Computational & Inference Data
+(Note: these are existing numbers built into previous iterations of the document representing our benchmark measurements)
+
+*   **SM-UNet (ResNet34)**
+    *   Parameters: `24.46 M`
+    *   Size: `93.82 MB`
+    *   Peak RAM: `~767 MB`
+    *   Intel i5 Latency: `278 ms`
+    *   RPi 4 Latency: `500 ms`
+*   **DeepLabV3+ (ResNet50)**
+    *   Parameters: `17.83 M`
+    *   Size: `68.57 MB`
+    *   Peak RAM: `~661 MB`
+    *   Intel i5 Latency: `325 ms`
+    *   RPi 4 Latency: `668 ms`
+*   **Ghost-CAS-UNet (Ours)**
+    *   Parameters: `1.98 M`
+    *   Size: `7.88 MB`
+    *   Peak RAM: `~684 MB`
+    *   Intel i5 Latency: `435 ms`
+    *   RPi 4 Latency: `934 ms`

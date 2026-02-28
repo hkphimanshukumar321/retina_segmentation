@@ -1,0 +1,15 @@
+\section{Introduction}
+Automated segmentation of retinal lesions plays a pivotal role in the early and accurate detection of diabetic retinopathy (DR), a leading cause of preventable blindness worldwide. Typical DR indicators include Microaneurysms (MA), Haemorrhages (HE), Hard Exudates (EX), and Soft Exudates (SE). However, their automated segmentation remains uniquely challenging because lesions—particularly MAs and SEs—are often minute, ambiguously bordered, and vastly outnumbered by healthy tissue. 
+
+Furthermore, a significant research gap exists regarding the clinical translation of these tools. While sophisticated deep learning models (e.g., standard U-Net \cite{unet_2015} or DeepLabV3+ \cite{deeplabv3_2018}) have pushed accuracy ceilings, their extensive parameter counts and strict dependence on heavy cloud-GPU infrastructure restrict their integration into point-of-care portable edge devices. In rural screening protocols where network connectivity is void, utilizing massive 90+ MB models with massive memory consumption causes out-of-memory (OOM) failures on low-power architectures like the Raspberry Pi.
+
+To address these compounding issues, this paper introduces a robust, edge-deployable deep learning framework optimized for the highly accurate segmentation of difficult retinal lesions offline. Our proposed architecture, Ghost-CAS-UNet, builds upon the foundational U-Net by drastically reducing computational overhead while enhancing positional awareness for minuscule features. Evaluated on the IDRiD dataset, the model secures a 74.40\% Mean Dice score using only 1.98M parameters and an ultra-lightweight 7.88 MB storage payload.
+
+The primary contributions of this paper are:
+\begin{itemize}
+    \item \textbf{Lightweight Architecture:} We propose a customized semantic segmentation framework utilizing Ghost Modules \cite{ghostnet_2020} and Coordinate Attention (CA) \cite{coord_attn_2021} to explicitly encode spatial mapping, reducing parameter count by $>90\%$ relative to ResNet34 baselines while improving sparse MA detection to 81.42\% Dice.
+    \item \textbf{Offline Edge Deployability:} We engineer the inference loop upon a bounded $256 \times 256$ sliding overlap-tile matrix, ensuring strict peak RAM utilization ($\sim$684 MB) facilitating successful native deployment on ARM-based endpoint CPUs (Raspberry Pi 4) at 934 ms per-patch inference.
+    \item \textbf{Robust Preprocessing:} We incorporate an advanced standalone pipeline integrating Ben Graham's normalization \cite{ben_graham_2015} over the L-channel of LAB space \cite{canet_2020} to standardize diverse illumination artifacts organically.
+\end{itemize}
+
+The remainder of this paper is organized as follows: Section II reviews related work. Section III details the mathematical and architectural design of the proposed pipeline. Section IV evaluates the IDRiD experimental results alongside formal edge benchmarking, and Section V concludes the framework.
