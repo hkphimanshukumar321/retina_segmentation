@@ -12,7 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
-MODEL_PATH="${MODEL_PATH:-${ROOT_DIR}/segmentation/results/pilot/pilot_model.keras}"
+MODEL_PATH="${MODEL_PATH:-${ROOT_DIR}/rpi_deploy/ghost_cas_unet_v2_full.h5}"
 RUNS="${RUNS:-1}"
 WARMUP="${WARMUP:-1}"
 
@@ -23,6 +23,7 @@ LOG_512="${OUT_512}/run.log"
 LOG_1024="${OUT_1024}/run.log"
 
 mkdir -p "${OUT_512}" "${OUT_1024}"
+PIDS=()
 
 if [[ ! -f "${MODEL_PATH}" ]]; then
   echo "[ERROR] Model file not found: ${MODEL_PATH}"
@@ -59,18 +60,16 @@ run_job() {
     nohup "${cmd[@]}" > "${logfile}" 2>&1 &
   fi
 
-  echo $!
+  PIDS+=("$!")
+  echo "[*] Started resolution ${resolution} on core ${core} (PID=${PIDS[-1]})"
 }
 
-PID_512="$(run_job 0 512 "${OUT_512}" "${LOG_512}")"
-PID_1024="$(run_job 1 1024 "${OUT_1024}" "${LOG_1024}")"
-
-echo "[*] Started 512 job  (PID=${PID_512})"
-echo "[*] Started 1024 job (PID=${PID_1024})"
+run_job 0 512 "${OUT_512}" "${LOG_512}"
+run_job 1 1024 "${OUT_1024}" "${LOG_1024}"
 
 echo "[*] Waiting for both jobs to finish..."
-wait "${PID_512}"
-wait "${PID_1024}"
+wait "${PIDS[0]}"
+wait "${PIDS[1]}"
 
 JSON_512="${OUT_512}/$(basename "${MODEL_PATH%.*}")_benchmark.json"
 JSON_1024="${OUT_1024}/$(basename "${MODEL_PATH%.*}")_benchmark.json"
@@ -83,3 +82,10 @@ echo "1024 JSON : ${JSON_1024}"
 echo "512 LOG   : ${LOG_512}"
 echo "1024 LOG  : ${LOG_1024}"
 echo "============================================================"
+
+echo ""
+echo "--- Tail: 512 run.log ---"
+tail -n 40 "${LOG_512}" || true
+echo ""
+echo "--- Tail: 1024 run.log ---"
+tail -n 40 "${LOG_1024}" || true
