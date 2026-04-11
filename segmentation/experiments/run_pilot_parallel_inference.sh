@@ -54,9 +54,9 @@ run_job() {
   )
 
   if command -v taskset >/dev/null 2>&1; then
-    taskset -c "${core}" "${cmd[@]}" > "${logfile}" 2>&1 &
+    nohup taskset -c "${core}" "${cmd[@]}" > "${logfile}" 2>&1 &
   else
-    "${cmd[@]}" > "${logfile}" 2>&1 &
+    nohup "${cmd[@]}" > "${logfile}" 2>&1 &
   fi
 
   echo $!
