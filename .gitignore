@@ -10,7 +10,7 @@ venv/
 
 # Data
 # data/
-# *.zip
+*.zip
 # *.tar.gz
 # *.tif
 # *.jpg
@@ -24,6 +24,13 @@ segmentation/results/
 *.json
 *.weights.h5
 *.keras
+
+# Explicit shared artifacts (root-level)
+ieee_paper_project.zip
+deeplabv3plus_resnet50_training_log.csv
+sm_unet_resnet34_training_log.csv
+pilot_training_log (1).csv
+pilot_metrics.json
 
 # IDE
 .vscode/
