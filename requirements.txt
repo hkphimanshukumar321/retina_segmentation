@@ -24,6 +24,7 @@ seaborn>=0.11.0
 # Utilities
 tqdm>=4.60.0
 psutil>=5.8.0
+optuna>=3.6.0
 
 # Optional: Performance monitoring
 gputil>=1.4.0

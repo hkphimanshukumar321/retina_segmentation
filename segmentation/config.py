@@ -58,6 +58,10 @@ class TrainingConfig:
     patches_per_image: int = 30               # ↓ 100→30 (fewer but larger patches)
     patches_per_image_val: int = 10           # ↓ 30→10 for 512×512 val patches
     clip_norm: float = 1.0
+    use_mixed_precision: bool = True
+    workers: int = 4
+    use_multiprocessing: bool = True
+    max_queue_size: int = 16
 
 
 @dataclass

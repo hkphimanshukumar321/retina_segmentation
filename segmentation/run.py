@@ -51,6 +51,12 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
 import numpy as np
+from tqdm.auto import tqdm
+
+try:
+    import optuna
+except Exception:
+    optuna = None
 
 # ---------------------------------------------------------------------------
 # Path setup — must come BEFORE any local imports
@@ -93,6 +99,33 @@ def set_seed(seed: int = 42):
     except Exception:
         pass
     logger.info(f"Random seeds set to {seed}")
+
+
+def _is_oom_error(exc: Exception) -> bool:
+    """Return True if an exception is TensorFlow GPU/CPU memory exhaustion."""
+    text = str(exc).lower()
+    tokens = ("resourceexhausted", "resource_exhausted", "oom", "out of memory")
+    return any(tok in text for tok in tokens)
+
+
+def _configure_tf_runtime(config: SegmentationConfig) -> None:
+    """Apply TensorFlow runtime knobs for stability and memory efficiency."""
+    import tensorflow as tf
+
+    # Allow incremental GPU memory growth instead of pre-allocating all VRAM.
+    try:
+        for gpu in tf.config.experimental.list_physical_devices("GPU"):
+            tf.config.experimental.set_memory_growth(gpu, True)
+    except Exception as e:
+        logger.warning(f"Could not enable GPU memory growth: {e}")
+
+    # Mixed precision substantially reduces activation memory on modern GPUs.
+    if getattr(config.training, "use_mixed_precision", True):
+        try:
+            tf.keras.mixed_precision.set_global_policy("mixed_float16")
+            logger.info("Mixed precision enabled: mixed_float16")
+        except Exception as e:
+            logger.warning(f"Could not enable mixed precision: {e}")
 
 
 # =============================================================================
@@ -316,6 +349,71 @@ def _train_model(model, train_gen, val_gen, config, results_dir: Path,
     model.summary(print_fn=logger.info)
 
     # --- Custom Logger ---
+    class TqdmTimingCallback(tf.keras.callbacks.Callback):
+        """Show per-batch tqdm and robust epoch ETA timing."""
+        def __init__(self):
+            super().__init__()
+            self.train_start = None
+            self.epoch_start = None
+            self.pbar = None
+
+        def on_train_begin(self, logs=None):
+            self.train_start = time.time()
+
+        def on_epoch_begin(self, epoch, logs=None):
+            self.epoch_start = time.time()
+            steps = self.params.get("steps")
+            total_epochs = self.params.get("epochs", 0)
+            self.pbar = tqdm(
+                total=steps,
+                desc=f"Epoch {epoch + 1}/{total_epochs}",
+                unit="batch",
+                dynamic_ncols=True,
+                leave=False,
+            )
+
+        def on_train_batch_end(self, batch, logs=None):
+            if self.pbar is None:
+                return
+            logs = logs or {}
+            self.pbar.update(1)
+            loss = logs.get("loss")
+            if loss is not None:
+                self.pbar.set_postfix(loss=f"{float(loss):.4f}")
+
+        def on_epoch_end(self, epoch, logs=None):
+            logs = logs or {}
+            if self.pbar is not None:
+                self.pbar.close()
+                self.pbar = None
+
+            epoch_time = time.time() - self.epoch_start
+            total_elapsed = time.time() - self.train_start
+            epochs_done = epoch + 1
+            total_epochs = self.params["epochs"]
+            eta_seconds = max(0.0, (total_epochs - epochs_done) * (total_elapsed / epochs_done))
+            eta_str = time.strftime("%H:%M:%S", time.gmtime(eta_seconds))
+
+            display_logs = {}
+            for k, v in logs.items():
+                prefix = "val_" if "val_" in k else ""
+                base = k[4:] if "val_" in k else k
+                clean_name = base.replace("main_out_", "") if "main_out_" in base else base
+                if "aux" not in base:
+                    display_logs[prefix + clean_name] = v
+
+            msg = f"Epoch {epochs_done}/{total_epochs} [{epoch_time:.1f}s, ETA: {eta_str}]"
+            msg += f" - loss: {display_logs.get('loss', 0):.4f}"
+            msg += f" - acc: {display_logs.get('accuracy', 0):.4f}"
+            msg += f" - iou: {display_logs.get('iou_score', 0):.4f}"
+            msg += f" - dice: {display_logs.get('dice_score', 0):.4f}"
+            if "val_loss" in display_logs:
+                msg += f" | val_loss: {display_logs['val_loss']:.4f}"
+                msg += f" - val_acc: {display_logs.get('val_accuracy', 0):.4f}"
+                msg += f" - val_iou: {display_logs.get('val_iou_score', 0):.4f}"
+                msg += f" - val_dice: {display_logs.get('val_dice_score', 0):.4f}"
+            print(msg)
+
     class SimpleLogger(tf.keras.callbacks.Callback):
         def __init__(self):
             super().__init__()
@@ -359,7 +457,7 @@ def _train_model(model, train_gen, val_gen, config, results_dir: Path,
                 msg += f" - val_acc: {display_logs.get('val_accuracy', 0):.4f}"
                 msg += f" - val_iou: {display_logs.get('val_iou_score', 0):.4f}"
                 msg += f" - val_dice: {display_logs.get('val_dice_score', 0):.4f}"
-            print(msg)
+            logger.info(msg)
 
     CLASS_NAMES_RUN = ("MA", "HE", "EX", "SE", "OD")
 
@@ -374,7 +472,13 @@ def _train_model(model, train_gen, val_gen, config, results_dir: Path,
         def on_epoch_end(self, epoch, logs=None):
             if (epoch + 1) % self.every_n != 0: return
             y_true_list, y_pred_list = [], []
-            for i in range(len(self.generator)):
+            for i in tqdm(
+                range(len(self.generator)),
+                desc=f"Val per-class epoch {epoch + 1}",
+                unit="batch",
+                dynamic_ncols=True,
+                leave=False,
+            ):
                 bx, by = self.generator[i]
                 preds = self.model.predict(bx, verbose=0)
                 if isinstance(preds, list): preds = preds[0]
@@ -400,6 +504,7 @@ def _train_model(model, train_gen, val_gen, config, results_dir: Path,
 
     # --- Callbacks ---
     callbacks = [
+        TqdmTimingCallback(),
         SimpleLogger(),
         tf.keras.callbacks.ModelCheckpoint(
             filepath=str(results_dir / f"{model_prefix}_best.weights.h5"),
@@ -450,21 +555,39 @@ def _train_model(model, train_gen, val_gen, config, results_dir: Path,
     t0 = time.time()
     print(f"[*] Starting model.fit() at {time.ctime()}...", flush=True)
     try:
-        history = model.fit(
-            train_data,
+        fit_kwargs = dict(
+            x=train_data,
             validation_data=val_data,
             epochs=epochs,
             steps_per_epoch=steps_per_epoch,
             validation_steps=validation_steps,
             callbacks=callbacks,
-            verbose=1,
+            verbose=0,
         )
+
+        # Multiprocessing workers for Sequence-based generators.
+        fit_kwargs.update(
+            workers=max(1, int(getattr(config.training, "workers", 4))),
+            use_multiprocessing=bool(getattr(config.training, "use_multiprocessing", True)),
+            max_queue_size=max(1, int(getattr(config.training, "max_queue_size", 16))),
+        )
+
+        try:
+            history = model.fit(**fit_kwargs)
+        except TypeError:
+            # Keras variants may not expose worker args; retry with compatible kwargs.
+            for k in ("workers", "use_multiprocessing", "max_queue_size"):
+                fit_kwargs.pop(k, None)
+            history = model.fit(**fit_kwargs)
     except KeyboardInterrupt:
         logger.warning("Training interrupted by user.")
         return None, {}
     except Exception as e:
         logger.error(f"Training failed: {e}", exc_info=True)
-        return None, {}
+        return None, {
+            "oom": _is_oom_error(e),
+            "error": str(e),
+        }
 
     train_time = time.time() - t0
 
@@ -681,6 +804,9 @@ def run_main(quick_test: bool = False) -> bool:
     if quick_test:
         config.training.epochs = 1
         config.data.img_size = (64, 64)
+        config.training.batch_size = min(config.training.batch_size, 4)
+
+    _configure_tf_runtime(config)
 
     print(f"  Model      : {config.model.name}")
     print(f"  Resolution : {config.data.img_size}")
@@ -694,39 +820,172 @@ def run_main(quick_test: bool = False) -> bool:
         return True
 
     train_imgs, train_masks, val_imgs, val_masks, data_dir = data
-    train_gen, val_gen = _build_generators(
-        train_imgs, train_masks, val_imgs, val_masks, config, quick_test
-    )
-    print(f"[*] Train batches: {len(train_gen)},  Val batches: {len(val_gen)}")
 
-    # Build model
     model_key = config.model.name.lower()
     if model_key not in SEGMENTATION_MODELS:
         logger.error(f"Unknown model: {model_key}. Available: {list(SEGMENTATION_MODELS.keys())}")
         return False
 
-    model = SEGMENTATION_MODELS[model_key](
-        input_shape=(*config.data.img_size, 3),
-        num_classes=config.model.num_classes,
-        encoder_filters=config.model.encoder_filters,
-        dropout_rate=config.model.dropout_rate,
-        ghost_ratio=config.model.ghost_ratio,
-        use_skip_attention=config.model.use_skip_attention,
-        use_aspp=config.model.use_aspp,
-        deep_supervision=config.model.deep_supervision,
-    )
+    def build_model(cfg: SegmentationConfig):
+        return SEGMENTATION_MODELS[model_key](
+            input_shape=(*cfg.data.img_size, 3),
+            num_classes=cfg.model.num_classes,
+            encoder_filters=cfg.model.encoder_filters,
+            dropout_rate=cfg.model.dropout_rate,
+            ghost_ratio=cfg.model.ghost_ratio,
+            use_skip_attention=cfg.model.use_skip_attention,
+            use_aspp=cfg.model.use_aspp,
+            deep_supervision=cfg.model.deep_supervision,
+        )
 
+    requested_bs = int(config.training.batch_size)
+    batch_candidates = []
+    cur = requested_bs
+    while cur >= 1:
+        if cur not in batch_candidates:
+            batch_candidates.append(cur)
+        if cur == 1:
+            break
+        cur = max(1, cur // 2)
+
+    history = None
+    info: Dict[str, Any] = {}
+    model = None
     results_dir = current_dir / "results"
-    history, info = _train_model(
-        model, train_gen, val_gen, config, results_dir,
-        quick_test=quick_test, model_prefix="main",
-    )
+    for bs in batch_candidates:
+        config.training.batch_size = bs
+        logger.info(f"Training attempt with batch_size={bs}")
+        train_gen, val_gen = _build_generators(
+            train_imgs, train_masks, val_imgs, val_masks, config, quick_test
+        )
+        print(f"[*] Train batches: {len(train_gen)},  Val batches: {len(val_gen)}")
+
+        model = build_model(config)
+        history, info = _train_model(
+            model, train_gen, val_gen, config, results_dir,
+            quick_test=quick_test, model_prefix="main",
+        )
+        if history is not None:
+            if bs != requested_bs:
+                logger.warning(
+                    f"Recovered from OOM by reducing batch_size {requested_bs} -> {bs}"
+                )
+            break
+        if not info.get("oom", False):
+            break
+        logger.warning(f"OOM at batch_size={bs}; retrying with smaller batch.")
 
     # --- TEST PHASE (FIX #1) ---
-    if history is not None:
+    if history is not None and model is not None:
         _evaluate_test(model, config, results_dir, "Ghost_CAS_UNet_v2", quick_test)
 
     return history is not None
+
+
+def run_optuna(quick_test: bool = False, n_trials: int = 15, timeout_s: Optional[int] = None) -> bool:
+    """Run Optuna hyperparameter tuning with OOM-aware objective pruning."""
+    if optuna is None:
+        print("[!] Optuna is not installed. Install with: pip install optuna")
+        return False
+
+    print("\n" + "=" * 60)
+    print("  SEGMENTATION - OPTUNA TUNING")
+    print("=" * 60)
+
+    setup_logging(log_dir=current_dir / "logs")
+    set_seed(42)
+
+    base_cfg = SegmentationConfig()
+    if quick_test:
+        base_cfg.training.epochs = 1
+        base_cfg.data.img_size = (128, 128)
+    else:
+        base_cfg.training.epochs = min(base_cfg.training.epochs, 12)
+
+    _configure_tf_runtime(base_cfg)
+
+    data = _resolve_data(base_cfg)
+    if data is None:
+        print("[!] Data not available. Skipping Optuna.")
+        return False
+
+    train_imgs, train_masks, val_imgs, val_masks, _ = data
+    model_key = base_cfg.model.name.lower()
+    if model_key not in SEGMENTATION_MODELS:
+        logger.error(f"Unknown model: {model_key}. Available: {list(SEGMENTATION_MODELS.keys())}")
+        return False
+
+    tuning_dir = current_dir / "results" / "optuna"
+    tuning_dir.mkdir(parents=True, exist_ok=True)
+
+    def objective(trial):
+        import tensorflow as tf
+
+        cfg = SegmentationConfig()
+        cfg.training.use_mixed_precision = True
+        cfg.training.workers = base_cfg.training.workers
+        cfg.training.use_multiprocessing = base_cfg.training.use_multiprocessing
+        cfg.training.max_queue_size = base_cfg.training.max_queue_size
+
+        cfg.model.dropout_rate = trial.suggest_float("dropout_rate", 0.05, 0.30)
+        cfg.model.ghost_ratio = trial.suggest_categorical("ghost_ratio", [2, 4])
+        cfg.training.learning_rate = trial.suggest_float("learning_rate", 1e-4, 3e-3, log=True)
+        cfg.training.batch_size = trial.suggest_categorical("batch_size", [2, 4, 8])
+        cfg.training.patches_per_image = trial.suggest_categorical("patches_per_image", [12, 20, 30])
+        cfg.training.patches_per_image_val = trial.suggest_categorical("patches_per_image_val", [6, 10, 14])
+        cfg.training.epochs = base_cfg.training.epochs
+        cfg.data.img_size = base_cfg.data.img_size
+
+        _configure_tf_runtime(cfg)
+
+        train_gen, val_gen = _build_generators(
+            train_imgs, train_masks, val_imgs, val_masks, cfg, quick_test
+        )
+
+        model = SEGMENTATION_MODELS[model_key](
+            input_shape=(*cfg.data.img_size, 3),
+            num_classes=cfg.model.num_classes,
+            encoder_filters=cfg.model.encoder_filters,
+            dropout_rate=cfg.model.dropout_rate,
+            ghost_ratio=cfg.model.ghost_ratio,
+            use_skip_attention=cfg.model.use_skip_attention,
+            use_aspp=cfg.model.use_aspp,
+            deep_supervision=cfg.model.deep_supervision,
+        )
+
+        trial_dir = tuning_dir / f"trial_{trial.number:03d}"
+        history, info = _train_model(
+            model, train_gen, val_gen, cfg, trial_dir,
+            quick_test=quick_test, model_prefix=f"optuna_{trial.number:03d}",
+        )
+
+        if history is None:
+            if info.get("oom", False):
+                raise optuna.exceptions.TrialPruned("OOM detected; trial pruned.")
+            raise RuntimeError(info.get("error", "Training failed."))
+
+        h = history.history
+        val_loss = float(h.get("val_loss", [float("inf")])[-1])
+        trial.set_user_attr("train_time_s", info.get("train_time_s", None))
+        tf.keras.backend.clear_session()
+        return val_loss
+
+    study = optuna.create_study(direction="minimize", study_name="segmentation_oom_safe")
+    study.optimize(objective, n_trials=n_trials, timeout=timeout_s, gc_after_trial=True)
+
+    best = {
+        "best_value": study.best_value,
+        "best_params": study.best_params,
+        "n_trials": len(study.trials),
+    }
+    with open(tuning_dir / "best_config.json", "w", encoding="utf-8") as f:
+        json.dump(best, f, indent=2)
+
+    print("[*] Optuna complete.")
+    print(f"[*] Best val_loss: {study.best_value:.6f}")
+    print(f"[*] Best params  : {study.best_params}")
+    print(f"[*] Saved        : {tuning_dir / 'best_config.json'}")
+    return True
 
 
 # =============================================================================
@@ -887,6 +1146,9 @@ def run_baselines(quick_test: bool = False) -> bool:
     if quick_test:
         config.training.epochs = 1
         config.data.img_size = (64, 64)
+        config.training.batch_size = min(config.training.batch_size, 4)
+
+    _configure_tf_runtime(config)
 
     data = _resolve_data(config)
     if data is None:
@@ -961,6 +1223,9 @@ if __name__ == "__main__":
     parser.add_argument("--quick", action="store_true", help="Quick smoke test (1 epoch)")
     parser.add_argument("--ablation", action="store_true", help="Run ablation study")
     parser.add_argument("--baselines", action="store_true", help="Run baseline comparison")
+    parser.add_argument("--optuna", action="store_true", help="Run Optuna hyperparameter tuning")
+    parser.add_argument("--trials", type=int, default=15, help="Optuna trials")
+    parser.add_argument("--timeout", type=int, default=None, help="Optuna timeout in seconds")
     args = parser.parse_args()
 
     try:
@@ -968,6 +1233,8 @@ if __name__ == "__main__":
             success = run_ablation(quick_test=args.quick)
         elif args.baselines:
             success = run_baselines(quick_test=args.quick)
+        elif args.optuna:
+            success = run_optuna(quick_test=args.quick, n_trials=args.trials, timeout_s=args.timeout)
         else:
             success = run_main(quick_test=args.quick)
         sys.exit(0 if success else 1)
