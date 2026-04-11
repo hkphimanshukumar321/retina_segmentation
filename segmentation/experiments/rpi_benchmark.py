@@ -77,6 +77,23 @@ def load_any_model(model_path: Path):
     Does NOT require any project code.
     """
     import tensorflow as tf
+    try:
+        from segmentation.src.models import (
+            GhostModule,
+            CoordinateAttention,
+            AttentionGate,
+            GhostBottleneck,
+            DW_ASPP,
+        )
+        custom_objects = {
+            "GhostModule": GhostModule,
+            "CoordinateAttention": CoordinateAttention,
+            "AttentionGate": AttentionGate,
+            "GhostBottleneck": GhostBottleneck,
+            "DW_ASPP": DW_ASPP,
+        }
+    except Exception:
+        custom_objects = {}
 
     suffix = model_path.suffix.lower()
 
@@ -84,7 +101,11 @@ def load_any_model(model_path: Path):
     if suffix == ".h5":
         print(f"[*] Loading H5 model: {model_path.name}")
         try:
-            model = tf.keras.models.load_model(str(model_path), compile=False)
+            model = tf.keras.models.load_model(
+                str(model_path),
+                compile=False,
+                custom_objects=custom_objects or None,
+            )
             print("[*] Loaded OK.")
             return model
         except Exception as e:
@@ -96,7 +117,11 @@ def load_any_model(model_path: Path):
 
         # Attempt 1: plain load (works for standard models)
         try:
-            model = tf.keras.models.load_model(str(model_path), compile=False)
+            model = tf.keras.models.load_model(
+                str(model_path),
+                compile=False,
+                custom_objects=custom_objects or None,
+            )
             print("[*] Loaded OK.")
             return model
         except Exception:
@@ -104,7 +129,12 @@ def load_any_model(model_path: Path):
 
         # Attempt 2: safe_mode=False
         try:
-            model = tf.keras.models.load_model(str(model_path), compile=False, safe_mode=False)
+            model = tf.keras.models.load_model(
+                str(model_path),
+                compile=False,
+                safe_mode=False,
+                custom_objects=custom_objects or None,
+            )
             print("[*] Loaded OK (safe_mode=False).")
             return model
         except Exception:
@@ -137,7 +167,10 @@ def load_any_model(model_path: Path):
                 cfg = _json.load(f)
 
             try:
-                model = tf.keras.models.model_from_json(_json.dumps(cfg["config"]))
+                model = tf.keras.models.model_from_json(
+                    _json.dumps(cfg["config"]),
+                    custom_objects=custom_objects or None,
+                )
             except Exception as e:
                 raise RuntimeError(
                     f"Could not reconstruct model from config: {e}\n"
@@ -149,6 +182,25 @@ def load_any_model(model_path: Path):
             return model
 
     raise ValueError(f"Unsupported file type: {suffix}. Use .keras or .h5")
+
+
+def _prepare_benchmark_input(dummy: np.ndarray, model, resolution: int) -> np.ndarray:
+    """Resize benchmark input to the model's native size if the model expects a fixed shape."""
+    import tensorflow as tf
+
+    expected_shape = getattr(model, "input_shape", None)
+    if not expected_shape or len(expected_shape) < 4:
+        return dummy
+
+    target_h, target_w = expected_shape[1], expected_shape[2]
+    if target_h is None or target_w is None:
+        return dummy
+
+    if (resolution, resolution) == (target_h, target_w):
+        return dummy
+
+    resized = tf.image.resize(dummy, (target_h, target_w), method="bilinear")
+    return resized.numpy() if hasattr(resized, "numpy") else np.asarray(resized)
 
 
 # ---------------------------------------------------------------------------
@@ -206,9 +258,10 @@ def run_benchmark(
 
     # --- Warmup ---
     print(f"[*] Warmup ({n_warmup} passes) ...")
+    dummy_model_input = _prepare_benchmark_input(dummy, model, resolution)
     with tf.device("/CPU:0"):
         for _ in range(n_warmup):
-            model.predict(dummy, verbose=0)
+            model.predict(dummy_model_input, verbose=0)
 
     # --- Timed runs ---
     print(f"[*] Benchmarking ({n_runs} passes) ...")
@@ -218,7 +271,7 @@ def run_benchmark(
     with tf.device("/CPU:0"):
         for i in range(n_runs):
             t0 = time.perf_counter()
-            model.predict(dummy, verbose=0)
+            model.predict(dummy_model_input, verbose=0)
             elapsed_ms = (time.perf_counter() - t0) * 1000
             times.append(elapsed_ms)
             peak_mem = max(peak_mem, get_memory_mb())
